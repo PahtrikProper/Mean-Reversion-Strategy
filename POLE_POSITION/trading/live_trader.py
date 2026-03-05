@@ -5,11 +5,10 @@ Entry:  high drops back below premium_k band (crossover)
         AND RSI >= 40 (not deeply oversold)
 Exit:   TP hit (Bybit server-side TP)
         OR trail stop: high >= min_low_since_entry + mult×ATR  (Jason McIntosh)
-        OR time exit (days_held >= holding_days)
         OR band exit: low drops below discount_k band (mirrors entry logic)
         OR liquidation (detected via REST poll)
 
-No hard stop-loss — TP, trail stop, time, and band exits only.
+No hard stop-loss — TP, trail stop, and band exits only.
 Trail stop trails DOWN as price falls for the SHORT, locking in profit.
 """
 
@@ -490,7 +489,6 @@ class LiveRealTrader:
             result,
             self.entry_params.ma_len,
             float(self.entry_params.band_mult),
-            self.exit_params.holding_days,
             float(self.exit_params.tp_pct),
         ])
 
@@ -539,7 +537,7 @@ class LiveRealTrader:
             f"[{ts_utc}]  {self.symbol} #{self.closed_candle_count} {self.interval}m  "
             f"C={c:.5f}  |  "
             f"ADX={adx:.1f}(<{ADX_THRESHOLD:.0f})  RSI={rsi:.1f}(>={RSI_NEUTRAL_LO:.0f})  "
-            f"Hold={xp.holding_days}d  |  "
+            f"TP={xp.tp_pct*100:.3f}%  |  "
             f"{sig_col}{sig_str}{COLOR_RESET}  |  "
             f"W={self.win_count} L={self.trade_count - self.win_count} WR={wr:.0f}%  "
             f"wallet=${self.wallet:.2f}  "
@@ -597,10 +595,9 @@ class LiveRealTrader:
             maker_fee = maker_fee_for(self.symbol)
 
             saved_best = {
-                "ma_len":       self.entry_params.ma_len,
-                "band_mult":    self.entry_params.band_mult,
-                "holding_days": self.exit_params.holding_days,
-                "tp_pct":       self.exit_params.tp_pct,
+                "ma_len":    self.entry_params.ma_len,
+                "band_mult": self.entry_params.band_mult,
+                "tp_pct":    self.exit_params.tp_pct,
             }
 
             opt = optimise_params(
@@ -633,7 +630,6 @@ class LiveRealTrader:
                 f"[REOPT] {self.symbol}: MC score={new_mc_score:.4f} | "
                 f"MA-len={new_entry.ma_len} "
                 f"BandMult={new_entry.band_mult:.2f}% "
-                f"Hold={new_exit.holding_days}d "
                 f"TP={new_exit.tp_pct*100:.2f}%"
             )
 
@@ -663,7 +659,6 @@ class LiveRealTrader:
           4. Detect externally-closed position (server TP or liquidation)
           5. Update min_low_since_entry for trail stop tracking
           6. Check Jason McIntosh trail stop (high >= min_low + mult×ATR)  [priority 3]
-          7. Check time exit (if in position and holding_days exceeded)     [priority 4]
           8. Check band exit (low drops below discount_k band — mirrors entry logic) [priority 5]
           9. Check entry signal (band crossover AND ADX gate AND RSI gate)
          10. Log candle-close summary
@@ -730,18 +725,6 @@ class LiveRealTrader:
         if self.position is not None and self._min_low_since_entry is not None:
             self._min_low_since_entry = min(self._min_low_since_entry, l)
 
-        # ── Time exit check ──
-        time_exit = False
-        if self.position is not None and self._entry_time is not None:
-            try:
-                bar_ts_naive  = ts.tz_convert(None) if ts.tzinfo else ts
-                entry_ts_naive = self._entry_time.tz_convert(None) if self._entry_time.tzinfo else self._entry_time
-                days_held = (bar_ts_naive - entry_ts_naive).total_seconds() / 86400.0
-                if days_held >= float(self.exit_params.holding_days):
-                    time_exit = True
-            except Exception:
-                pass
-
         # ── Jason McIntosh trail stop signal ──
         trail_stop_exit = False
         if self.position is not None and self._min_low_since_entry is not None:
@@ -753,7 +736,7 @@ class LiveRealTrader:
 
         if entry_sig:
             self.last_signal = {"type": "ENTRY", "time": ts_utc, "placed": False, "filled": False, "price": None}
-        elif exit_sig or time_exit or trail_stop_exit:
+        elif exit_sig or trail_stop_exit:
             self.last_signal = {"type": "EXIT",  "time": ts_utc, "placed": False, "filled": False, "price": None}
 
         # ── Jason McIntosh trail stop exit ──  (priority 3, matches backtester)
@@ -761,12 +744,7 @@ class LiveRealTrader:
             self._execute_exit(c, "TRAIL_STOP", ts_utc)
             acted = True
 
-        # ── Time exit ──  (priority 4, matches backtester)
-        if not acted and time_exit and self.position is not None:
-            self._execute_exit(c, "TIME_EXIT", ts_utc)
-            acted = True
-
-        # ── Band exit ──  (priority 5, only if no other action this candle)
+        # ── Band exit ──  (priority 4, only if no other action this candle)
         if not acted and exit_sig and self.position is not None:
             self._execute_exit(c, "BAND_EXIT", ts_utc)
             acted = True
@@ -786,7 +764,7 @@ class LiveRealTrader:
         # ── Display ──
         self._display_candle_close(
             ts_utc=ts_utc, o=o, h=h, l=l, c=c,
-            entry_sig=entry_sig, exit_sig=exit_sig or time_exit,
+            entry_sig=entry_sig, exit_sig=exit_sig,
             adx=adx_val, rsi=rsi_val,
         )
 

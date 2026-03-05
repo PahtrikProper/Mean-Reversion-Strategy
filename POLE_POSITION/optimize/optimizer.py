@@ -2,7 +2,7 @@
 
 Searches for the best combination of:
   EntryParams: ma_len, band_mult
-  ExitParams:  holding_days, tp_pct
+  ExitParams:  tp_pct
 
 ADX_THRESHOLD (25) and RSI_NEUTRAL_LO (40) are fixed — not optimised.
 
@@ -10,7 +10,7 @@ band_mult is stored as an integer × 10 (3 = 0.3, 100 = 10.0) during search
 for efficient integer arithmetic, then converted to float for EntryParams.
 
 tp_pct is optimised in the range OPT_TP_MIN_BP–OPT_TP_MAX_BP (basis points * 0.0001).
-  e.g. 18 bp = 0.18% price move before leverage.  No stop-loss.
+  e.g. 18 bp = 0.18% price move before leverage.  No stop-loss.  No time exit.
 
 Uses randomised search with exploitation/exploration split:
   EXPLOIT_RATIO of trials are sampled near the previously saved best params.
@@ -32,7 +32,6 @@ from ..utils.constants import (
     DEFAULT_TP_PCT,
     OPT_MA_LEN_MIN,        OPT_MA_LEN_MAX,
     OPT_BAND_MULT_X10_MIN, OPT_BAND_MULT_X10_MAX,
-    OPT_HOLDING_MIN,       OPT_HOLDING_MAX,
     OPT_TP_MIN_BP,         OPT_TP_MAX_BP,
     OPT_N_RANDOM,
     OPT_MIN_TRADES,
@@ -40,7 +39,6 @@ from ..utils.constants import (
     EXPLOIT_RATIO,
     EXPLOIT_MA_LEN_RADIUS,
     EXPLOIT_BAND_MULT_RADIUS_X10,
-    EXPLOIT_HOLDING_RADIUS,
     EXPLOIT_TP_RADIUS_BP,
     PARAMS_CSV_PATH,
 )
@@ -68,12 +66,12 @@ def optimise_params(
     progress_callback=None,
     verbose: bool = True,
 ) -> Dict[str, Any]:
-    """Random search over (ma_len, band_mult, holding_days, tp_pct).
+    """Random search over (ma_len, band_mult, tp_pct).
 
     band_mult is searched as integer × 10 for efficiency, converted to float for params.
     ADX_THRESHOLD=25 and RSI_NEUTRAL_LO=40 are fixed constants (not optimised).
-    tp_pct is optimised in range OPT_TP_MIN_BP–OPT_TP_MAX_BP (0.18–0.38% price move).
-    No stop-loss.
+    tp_pct is optimised in range OPT_TP_MIN_BP–OPT_TP_MAX_BP (0.18–11.00% price move).
+    No stop-loss.  No time exit.
 
     Returns dict:
         {
@@ -108,7 +106,6 @@ def optimise_params(
         b_bm_x10 = int(np.clip(
             round(float(saved_best.get("band_mult", 2.5)) * 10),
             OPT_BAND_MULT_X10_MIN, OPT_BAND_MULT_X10_MAX))
-        b_hd    = int(saved_best.get("holding_days", 30))
         b_tp_bp = int(np.clip(
             round(float(saved_best.get("tp_pct", DEFAULT_TP_PCT)) * 10000),
             OPT_TP_MIN_BP, OPT_TP_MAX_BP))
@@ -123,13 +120,10 @@ def optimise_params(
                 rng.integers(b_bm_x10 - EXPLOIT_BAND_MULT_RADIUS_X10,
                              b_bm_x10 + EXPLOIT_BAND_MULT_RADIUS_X10 + 1),
                 OPT_BAND_MULT_X10_MIN, OPT_BAND_MULT_X10_MAX))
-            hd    = int(np.clip(
-                rng.integers(b_hd - EXPLOIT_HOLDING_RADIUS, b_hd + EXPLOIT_HOLDING_RADIUS + 1),
-                OPT_HOLDING_MIN, OPT_HOLDING_MAX))
             tp_bp = int(np.clip(
                 rng.integers(b_tp_bp - EXPLOIT_TP_RADIUS_BP, b_tp_bp + EXPLOIT_TP_RADIUS_BP + 1),
                 OPT_TP_MIN_BP, OPT_TP_MAX_BP))
-            key = (ma, bm_x10, hd, tp_bp)
+            key = (ma, bm_x10, tp_bp)
             if key not in seen:
                 seen.add(key)
                 combos.append(key)
@@ -140,9 +134,8 @@ def optimise_params(
         attempts += 1
         ma     = int(rng.integers(OPT_MA_LEN_MIN,        OPT_MA_LEN_MAX        + 1))
         bm_x10 = int(rng.integers(OPT_BAND_MULT_X10_MIN, OPT_BAND_MULT_X10_MAX + 1))
-        hd     = int(rng.integers(OPT_HOLDING_MIN,        OPT_HOLDING_MAX       + 1))
         tp_bp  = int(rng.integers(OPT_TP_MIN_BP,          OPT_TP_MAX_BP         + 1))
-        key = (ma, bm_x10, hd, tp_bp)
+        key = (ma, bm_x10, tp_bp)
         if key not in seen:
             seen.add(key)
             combos.append(key)
@@ -152,8 +145,7 @@ def optimise_params(
         print(f"\nTesting {total} param combos  [{event_name}]")
         print(f"  Entry — MA-len {OPT_MA_LEN_MIN}-{OPT_MA_LEN_MAX}  "
               f"BandMult {OPT_BAND_MULT_X10_MIN/10:.1f}-{OPT_BAND_MULT_X10_MAX/10:.1f}%")
-        print(f"  Exit  — Hold {OPT_HOLDING_MIN}-{OPT_HOLDING_MAX}d  "
-              f"TP {OPT_TP_MIN_BP*0.01:.2f}%-{OPT_TP_MAX_BP*0.01:.2f}% (band exit, no SL)")
+        print(f"  Exit  — TP {OPT_TP_MIN_BP*0.01:.2f}%-{OPT_TP_MAX_BP*0.01:.2f}% (band exit, trail stop, no SL, no time exit)")
         if saved_best:
             print(f"  Mode: {n_exploit} exploitation + {len(combos)-n_exploit} exploration")
         else:
@@ -164,11 +156,11 @@ def optimise_params(
     milestone = max(1, total // 10)
     pbar = tqdm(total=total, desc="Optimising", unit="trial", leave=False) if verbose else None
 
-    for idx, (ma, bm_x10, hd, tp_bp) in enumerate(combos, 1):
+    for idx, (ma, bm_x10, tp_bp) in enumerate(combos, 1):
         band_mult = bm_x10 / 10.0
         tp = tp_bp * 0.0001
         ep = EntryParams(ma_len=ma, band_mult=band_mult)
-        xp = ExitParams(tp_pct=tp, holding_days=hd)
+        xp = ExitParams(tp_pct=tp)
         res = backtest_once(dfl, dfm, risk_df, ep, xp, leverage, fee_rate, maker_fee_rate)
         if pbar:
             pbar.update(1)
@@ -192,10 +184,9 @@ def optimise_params(
             pf = 0.0
 
         results.append({
-            "ma_len":      ma,
-            "band_mult":   band_mult,
-            "holding_days": hd,
-            "tp_pct":      tp,
+            "ma_len":           ma,
+            "band_mult":        band_mult,
+            "tp_pct":           tp,
             "trades":           res.trades,
             "n_wins":           len(wins),
             "n_losses":         len(losses),
@@ -230,7 +221,6 @@ def optimise_params(
     )
     best_exit = ExitParams(
         tp_pct=best["tp_pct"],
-        holding_days=best["holding_days"],
     )
     best_res = best["_result_obj"]
 
@@ -239,7 +229,7 @@ def optimise_params(
         print(
             f"\n✓ OPTIMISATION COMPLETE [{event_name}]:\n"
             f"  Entry — MA-len={best_entry.ma_len}  BandMult={best_entry.band_mult:.2f}%\n"
-            f"  Exit  — Hold={best_exit.holding_days}d  TP={best_exit.tp_pct*100:.2f}%\n"
+            f"  Exit  — TP={best_exit.tp_pct*100:.2f}%\n"
             f"  Wins={best['n_wins']}  Losses={best['n_losses']}  WinRate={best['win_rate']:.1f}%  "
             f"PF={pf_str}  Return={best['return_pct']:.2f}%  Trades={best['trades']}\n"
         )
@@ -252,7 +242,6 @@ def optimise_params(
     csv_append(PARAMS_CSV_PATH, [
         ts_utc, event_name,
         best_entry.ma_len, round(best_entry.band_mult, 4),
-        best_exit.holding_days,
         round(best_exit.tp_pct, 6),
         round(best_res.final_wallet, 6),
         round(best_res.sharpe_ratio, 6),

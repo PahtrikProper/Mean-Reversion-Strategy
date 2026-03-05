@@ -12,8 +12,7 @@ Exit priority per candle:
   1. Liquidation  (mark high >= liq_price)
   2. Take-profit  (last low  <= tp_price)                       [fixed TP, optimised]
   3. Trail Stop   (last high >= min_low_since_entry + mult×ATR) [Jason McIntosh, SHORT]
-  4. Time exit    (days_held >= holding_days)                   [optimised]
-  5. Band exit    (last low drops below discount_k band)        [mirrors entry logic]
+  4. Band exit    (last low drops below discount_k band)        [mirrors entry logic]
 
 No hard stop-loss. Trail stop trails DOWN as price falls (locking in profit for SHORT).
 """
@@ -68,7 +67,7 @@ def backtest_once(
         df_mark_raw:   Mark-price OHLCV (ts, open, high, low, close)
         risk_df:       Bybit risk tier table
         entry_params:  EntryParams(ma_len, band_mult)
-        exit_params:   ExitParams(tp_pct, holding_days)
+        exit_params:   ExitParams(tp_pct)
         leverage:      Leverage multiplier
         fee_rate:      Taker fee rate (exits)
         maker_fee_rate: Maker fee rate (entries); defaults to fee_rate
@@ -111,7 +110,6 @@ def backtest_once(
     entry_price_bt       = 0.0
     entry_fee            = 0.0
     wallet_at_entry      = 0.0
-    entry_ts             = None          # pd.Timestamp of entry bar
     in_position          = False
     liquidated           = False
     min_low_since_entry  = float("inf")  # Jason McIntosh trail stop tracking
@@ -130,7 +128,6 @@ def backtest_once(
         high_last  = float(row["high"])
         mark_high  = float(mrow["high"])
         mark_close = float(mrow["close"])
-        bar_ts     = row["ts"]
 
         exited = False
 
@@ -179,7 +176,7 @@ def backtest_once(
                     reason="TP", wallet_at_entry=wallet_at_entry,
                 ))
                 pos_qty = 0.0; entry_price_bt = 0.0; entry_fee = 0.0
-                wallet_at_entry = 0.0; in_position = False; entry_ts = None
+                wallet_at_entry = 0.0; in_position = False
                 min_low_since_entry = float("inf")
                 exited = True
 
@@ -204,35 +201,11 @@ def backtest_once(
                             reason="TRAIL_STOP", wallet_at_entry=wallet_at_entry,
                         ))
                         pos_qty = 0.0; entry_price_bt = 0.0; entry_fee = 0.0
-                        wallet_at_entry = 0.0; in_position = False; entry_ts = None
+                        wallet_at_entry = 0.0; in_position = False
                         min_low_since_entry = float("inf")
                         exited = True
 
-            # 4. Time exit (optimised holding_days)  — original priority 3
-            if not exited and pos_qty != 0.0 and entry_ts is not None:
-                try:
-                    days_held = (bar_ts - entry_ts).total_seconds() / 86400.0
-                except Exception:
-                    days_held = 0.0
-                if days_held >= float(exit_params.holding_days):
-                    fill      = _apply_slippage(close, "buy")
-                    pnl_gross = (entry_price_bt - fill) * qty_abs
-                    exit_fee  = (qty_abs * fill) * fee_rate
-                    wallet   += pnl_gross - exit_fee
-                    pnl_net   = pnl_gross - entry_fee - exit_fee
-                    trade_pnls.append(pnl_net)
-                    trade_records.append(TradeRecord(
-                        side="SHORT", entry_price=entry_price_bt, exit_price=fill,
-                        qty=qty_abs, entry_fee=entry_fee, exit_fee=exit_fee,
-                        pnl_gross=pnl_gross, pnl_net=pnl_net,
-                        reason="TIME", wallet_at_entry=wallet_at_entry,
-                    ))
-                    pos_qty = 0.0; entry_price_bt = 0.0; entry_fee = 0.0
-                    wallet_at_entry = 0.0; in_position = False; entry_ts = None
-                    min_low_since_entry = float("inf")
-                    exited = True
-
-            # 5. Band exit (low drops below discount_k — mirrors premium band entry)
+            # 4. Band exit (low drops below discount_k — mirrors premium band entry)
             if not exited and pos_qty != 0.0:
                 _raw_exit = compute_exit_signals_raw(
                     current_row=row, prev_row=prev,
@@ -253,7 +226,7 @@ def backtest_once(
                         wallet_at_entry=wallet_at_entry,
                     ))
                     pos_qty = 0.0; entry_price_bt = 0.0; entry_fee = 0.0
-                    wallet_at_entry = 0.0; in_position = False; entry_ts = None
+                    wallet_at_entry = 0.0; in_position = False
                     min_low_since_entry = float("inf")
                     exited = True
 
@@ -274,7 +247,6 @@ def backtest_once(
                 pos_qty              = -qty
                 entry_price_bt       = fill
                 entry_fee            = fee
-                entry_ts             = bar_ts
                 in_position          = True
                 min_low_since_entry  = low_last  # initialise trail stop tracking
 

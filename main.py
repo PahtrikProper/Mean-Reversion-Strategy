@@ -5,7 +5,7 @@ Mean Reversion Trader — Mean Reversion Strategy (SHORT only)
 Entry:  high drops back below premium_k band (crossover)
         AND ADX < 25  (range-bound regime)
         AND RSI >= 40 (not deeply oversold)
-Exit:   TP (fixed), time (holding_days), or band exit
+Exit:   TP (fixed), trail stop (Jason McIntosh ATR), or band exit
         Band: low drops below discount_k band (mirrors entry logic)
 
 Usage:
@@ -101,7 +101,6 @@ class Config:
             if "band_mult" in ec: const_module.DEFAULT_BAND_MULT = float(ec["band_mult"])
         if "exit" in cfg:
             xc = cfg["exit"]
-            if "holding_days" in xc: const_module.DEFAULT_HOLDING_DAYS = int(xc["holding_days"])
             if "tp_pct"       in xc: const_module.DEFAULT_TP_PCT       = float(xc["tp_pct"])
         if "optimizer" in cfg:
             oc = cfg["optimizer"]
@@ -178,7 +177,6 @@ def run_live_trading():
             print(
                 f"  {symbol} {interval}m  "
                 f"MA={ep.ma_len} BandMult={ep.band_mult:.2f}%  "
-                f"Hold={xp.holding_days}d  "
                 f"TP={xp.tp_pct*100:.4f}%  "
                 f"WR={br.winrate:.1f}%  PnL={br.pnl_pct:.2f}%  DD={br.max_drawdown_pct:.1f}%"
             )
@@ -204,10 +202,10 @@ def run_live_trading():
     print(
         f"  {'Rank':<5} {'Symbol':<12} {'Int':>4}  "
         f"{'PnL%':>8}  {'DD%':>7}  {'Score':>9}  {'Trades':>7}  {'WR%':>6}  "
-        f"{'MA':>5} {'BandMult':>9} {'Hold':>5} {'TP%':>6}"
+        f"{'MA':>5} {'BandMult':>9} {'TP%':>6}"
     )
     print(f"  {'─'*4}  {'─'*11} {'─'*4}  {'─'*8}  {'─'*7}  {'─'*9}  {'─'*7}  {'─'*6}  "
-          f"{'─'*5} {'─'*9} {'─'*5} {'─'*6}")
+          f"{'─'*5} {'─'*9} {'─'*6}")
     for rank, ((sym, iv), d) in enumerate(ranked, 1):
         br = d["best_result"]
         ep = d["entry_params"]
@@ -217,7 +215,7 @@ def run_live_trading():
             f"{br.pnl_pct:>8.2f}%  {br.max_drawdown_pct:>6.1f}%  "
             f"{d['score']:>9.4f}  {br.trades:>7}  {br.winrate:>5.1f}%  "
             f"{ep.ma_len:>5} {ep.band_mult:>8.2f}% "
-            f"{xp.holding_days:>5} {xp.tp_pct*100:>5.3f}%"
+            f"{xp.tp_pct*100:>5.3f}%"
         )
     print(f"{'═'*80}\n")
 
@@ -240,7 +238,6 @@ def run_live_trading():
             f"    #{i}  {sym}  [{d['interval']}m]  "
             f"Score={d['score']:.4f}  PnL={br.pnl_pct:.2f}%  DD={br.max_drawdown_pct:.1f}%  "
             f"MA={ep.ma_len} BandMult={ep.band_mult:.2f}%  "
-            f"Hold={xp.holding_days}d  "
             f"TP={xp.tp_pct*100:.4f}%"
         )
     print()
@@ -341,7 +338,6 @@ def run_paper_trading():
                 print(
                     f"  {symbol} {interval}m  "
                     f"MA={ep.ma_len} BandMult={ep.band_mult:.2f}%  "
-                    f"Hold={xp.holding_days}d  "
                     f"TP={xp.tp_pct*100:.4f}%  "
                     f"WR={br.winrate:.1f}%  PnL={br.pnl_pct:.2f}%  DD={br.max_drawdown_pct:.1f}%"
                 )
@@ -374,10 +370,10 @@ def run_paper_trading():
     print(
         f"  {'Rank':<5} {'Symbol':<12} {'Int':>4}  "
         f"{'PnL%':>8}  {'DD%':>7}  {'Score':>9}  {'Trades':>7}  {'WR%':>6}  "
-        f"{'MA':>5} {'BandMult':>9} {'Hold':>5} {'TP%':>6}"
+        f"{'MA':>5} {'BandMult':>9} {'TP%':>6}"
     )
     print(f"  {'─'*4}  {'─'*11} {'─'*4}  {'─'*8}  {'─'*7}  {'─'*9}  {'─'*7}  {'─'*6}  "
-          f"{'─'*5} {'─'*9} {'─'*5} {'─'*6}")
+          f"{'─'*5} {'─'*9} {'─'*6}")
     for rank, ((sym, iv), d) in enumerate(ranked, 1):
         br = d["best_result"]
         ep = d["entry_params"]
@@ -387,7 +383,7 @@ def run_paper_trading():
             f"{br.pnl_pct:>8.2f}%  {br.max_drawdown_pct:>6.1f}%  "
             f"{d['score']:>9.4f}  {br.trades:>7}  {br.winrate:>5.1f}%  "
             f"{ep.ma_len:>5} {ep.band_mult:>8.2f}% "
-            f"{xp.holding_days:>5} {xp.tp_pct*100:>5.3f}%"
+            f"{xp.tp_pct*100:>5.3f}%"
         )
     print(f"{'═'*80}\n")
 
@@ -410,7 +406,6 @@ def run_paper_trading():
             f"    #{i}  {sym}  [{d['interval']}m]  "
             f"Score={d['score']:.4f}  PnL={br.pnl_pct:.2f}%  DD={br.max_drawdown_pct:.1f}%  "
             f"MA={ep.ma_len} BandMult={ep.band_mult:.2f}%  "
-            f"Hold={xp.holding_days}d  "
             f"TP={xp.tp_pct*100:.4f}%"
         )
     print()

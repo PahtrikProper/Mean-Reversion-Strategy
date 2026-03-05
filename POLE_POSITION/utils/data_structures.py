@@ -8,7 +8,6 @@ from .constants import (
     STARTING_WALLET,
     DEFAULT_MA_LEN,
     DEFAULT_BAND_MULT,
-    DEFAULT_HOLDING_DAYS,
     DEFAULT_TP_PCT,
     TRAIL_ATR_PERIOD,
     TRAIL_ATR_MULT,
@@ -26,7 +25,7 @@ class TradeRecord:
     exit_fee:        float
     pnl_gross:       float
     pnl_net:         float
-    reason:          str           # "TP", "TRAIL_STOP", "TIME", "BAND_EXIT", "LIQUIDATION"
+    reason:          str           # "TP", "TRAIL_STOP", "BAND_EXIT", "LIQUIDATION"
     wallet_at_entry: float = 0.0
 
     @property
@@ -98,17 +97,15 @@ class ExitParams:
         1. Liquidation  mark_high >= liq_price                        [not a param — handled externally]
         2. TP:          low  <= entry * (1 - tp_pct)                  [optimised]
         3. Trail Stop:  high >= min_low_since_entry + mult × ATR       [Jason McIntosh]
-        4. Time:        days_held >= holding_days                      [optimised]
-        5. Band:        low drops below discount_k band                [mirrors entry logic]
+        4. Band:        low drops below discount_k band                [mirrors entry logic]
 
-    No hard stop-loss — TP, trail stop, time, and band exits only.
+    No hard stop-loss — TP, trail stop, and band exits only.
     Trail stop trails DOWN as price falls (SHORT), locking in profit.
     Exit signal: current HIGH crosses above the trail stop level.
     """
-    tp_pct:           float = DEFAULT_TP_PCT        # take-profit fraction (e.g. 0.0028 = 0.28%)
-    holding_days:     int   = DEFAULT_HOLDING_DAYS  # max calendar days to hold
-    trail_atr_period: int   = TRAIL_ATR_PERIOD      # ATR lookback for Jason McIntosh trail stop
-    trail_atr_mult:   float = TRAIL_ATR_MULT        # ATR multiplier (stop = min_low + mult×ATR)
+    tp_pct:           float = DEFAULT_TP_PCT    # take-profit fraction (e.g. 0.0028 = 0.28%)
+    trail_atr_period: int   = TRAIL_ATR_PERIOD  # ATR lookback for Jason McIntosh trail stop
+    trail_atr_mult:   float = TRAIL_ATR_MULT    # ATR multiplier (stop = min_low + mult×ATR)
 
 
 # Legacy alias

@@ -4,7 +4,7 @@ Mean Reversion Trader — Bybit USDT Futures (SHORT only)
 Entry:  high drops back below premium_k band (crossover)
         AND ADX < 25  (range-bound regime)
         AND RSI >= 40 (not deeply oversold)
-Exit:   TP (fixed), time (holding_days), or band exit
+Exit:   TP (fixed), trail stop (Jason McIntosh ATR), or band exit
         Band: low drops below discount_k band (mirrors entry logic)
 """
 

@@ -44,7 +44,6 @@ LIVE_TP_SCALE = 0.75
 # ── Default strategy parameters ───────────────────────────────────────────────
 DEFAULT_MA_LEN       = 100    # RMA period for band centre line
 DEFAULT_BAND_MULT    = 2.5    # Band width multiplier (%)
-DEFAULT_HOLDING_DAYS = 30     # max calendar days to hold
 DEFAULT_TP_PCT       = 0.0028 # 0.28% take-profit (optimised; ~midpoint of range)
 
 # ── Jason McIntosh ATR trailing stop (SHORT exit) ─────────────────────────────
@@ -67,10 +66,6 @@ OPT_MA_LEN_MAX        = 300
 OPT_BAND_MULT_X10_MIN = 3    # 0.3%
 OPT_BAND_MULT_X10_MAX = 100  # 10.0%
 
-# Max holding period (days)
-OPT_HOLDING_MIN   = 1
-OPT_HOLDING_MAX   = 30
-
 # Take-profit (in basis points, 1 bp = 0.0001; 18 = 0.18%, 1100 = 11.00%)
 OPT_TP_MIN_BP       = 18    # 0.18% price move before leverage
 OPT_TP_MAX_BP       = 1100  # 11.00% price move before leverage
@@ -84,7 +79,6 @@ RANDOM_SEED       = None     # set int for reproducible runs
 EXPLOIT_RATIO                = 0.60
 EXPLOIT_MA_LEN_RADIUS        = 15
 EXPLOIT_BAND_MULT_RADIUS_X10 = 3    # ±0.3 around saved best band_mult
-EXPLOIT_HOLDING_RADIUS       = 5
 EXPLOIT_TP_RADIUS_BP         = 50   # ±0.50% around saved best TP
 
 # ── Runtime behaviour ─────────────────────────────────────────────────────────

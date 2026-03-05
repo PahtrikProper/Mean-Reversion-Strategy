@@ -3,7 +3,7 @@
 Uses public REST endpoints (klines, risk tiers, instrument info) and the
 public Bybit WebSocket for live candle and mark-price data.
 
-Simulates wallet, fills (close + slippage), TP, trail stop, time exit,
+Simulates wallet, fills (close + slippage), TP, trail stop,
 band exit, and liquidation using exactly the same logic as LiveRealTrader.
 No real orders are ever placed.
 """
@@ -381,7 +381,6 @@ class PaperTrader:
             result,
             self.entry_params.ma_len,
             float(self.entry_params.band_mult),
-            self.exit_params.holding_days,
             float(self.exit_params.tp_pct),
         ])
 
@@ -424,7 +423,7 @@ class PaperTrader:
             f"[PAPER][{ts_utc}]  {self.symbol} #{self.closed_candle_count} {self.interval}m  "
             f"C={c:.5f}  |  "
             f"ADX={adx:.1f}(<{ADX_THRESHOLD:.0f})  RSI={rsi:.1f}(>={RSI_NEUTRAL_LO:.0f})  "
-            f"Hold={xp.holding_days}d  |  "
+            f"TP={xp.tp_pct*100:.3f}%  |  "
             f"{sig_col}{sig_str}{COLOR_RESET}  |  "
             f"W={self.win_count} L={self.trade_count - self.win_count} WR={wr:.0f}%  "
             f"wallet=${self.wallet:.2f}  "
@@ -482,10 +481,9 @@ class PaperTrader:
             maker_fee = maker_fee_for(self.symbol)
 
             saved_best = {
-                "ma_len":       self.entry_params.ma_len,
-                "band_mult":    self.entry_params.band_mult,
-                "holding_days": self.exit_params.holding_days,
-                "tp_pct":       self.exit_params.tp_pct,
+                "ma_len":    self.entry_params.ma_len,
+                "band_mult": self.entry_params.band_mult,
+                "tp_pct":    self.exit_params.tp_pct,
             }
 
             opt = optimise_params(
@@ -517,7 +515,7 @@ class PaperTrader:
             log.info(
                 f"[PAPER][REOPT] {self.symbol}: MC score={new_mc_score:.4f} | "
                 f"MA-len={new_entry.ma_len}  BandMult={new_entry.band_mult:.2f}%  "
-                f"Hold={new_exit.holding_days}d  TP={new_exit.tp_pct*100:.2f}%"
+                f"TP={new_exit.tp_pct*100:.2f}%"
             )
 
             if new_mc_score > 0:
@@ -542,8 +540,7 @@ class PaperTrader:
           1. Liquidation   — mark_price >= liq_price
           2. Take-Profit   — candle low <= tp_price
           3. Trail Stop    — high >= min_low_since_entry + mult×ATR
-          4. Time Exit     — days_held >= holding_days
-          5. Band Exit     — low drops below discount band
+          4. Band Exit     — low drops below discount band
         """
         ts     = pd.to_datetime(int(candle["start"]), unit="ms", utc=True)
         ts_utc = ts.strftime("%Y-%m-%d %H:%M:%S")
@@ -629,18 +626,6 @@ class PaperTrader:
                 self._execute_exit(self._paper_tp_price, "TP", ts_utc)
                 acted = True
 
-        # ── Time exit check ──
-        time_exit = False
-        if self.position is not None and self._entry_time is not None:
-            try:
-                bar_ts_naive   = ts.tz_convert(None) if ts.tzinfo else ts
-                entry_ts_naive = self._entry_time.tz_convert(None) if self._entry_time.tzinfo else self._entry_time
-                days_held = (bar_ts_naive - entry_ts_naive).total_seconds() / 86400.0
-                if days_held >= float(self.exit_params.holding_days):
-                    time_exit = True
-            except Exception:
-                pass
-
         # ── Jason McIntosh trail stop signal ──
         trail_stop_exit = False
         if self.position is not None and self._min_low_since_entry is not None:
@@ -652,7 +637,7 @@ class PaperTrader:
 
         if entry_sig:
             self.last_signal = {"type": "ENTRY", "time": ts_utc, "placed": False, "filled": False, "price": None}
-        elif exit_sig or time_exit or trail_stop_exit:
+        elif exit_sig or trail_stop_exit:
             self.last_signal = {"type": "EXIT",  "time": ts_utc, "placed": False, "filled": False, "price": None}
 
         # ── Priority 3: Trail stop exit ──
@@ -660,12 +645,7 @@ class PaperTrader:
             self._execute_exit(c, "TRAIL_STOP", ts_utc)
             acted = True
 
-        # ── Priority 4: Time exit ──
-        if not acted and time_exit and self.position is not None:
-            self._execute_exit(c, "TIME_EXIT", ts_utc)
-            acted = True
-
-        # ── Priority 5: Band exit ──
+        # ── Priority 4: Band exit ──
         if not acted and exit_sig and self.position is not None:
             self._execute_exit(c, "BAND_EXIT", ts_utc)
             acted = True
@@ -684,7 +664,7 @@ class PaperTrader:
         # ── Display ──
         self._display_candle_close(
             ts_utc=ts_utc, o=o, h=h, l=l, c=c,
-            entry_sig=entry_sig, exit_sig=exit_sig or time_exit,
+            entry_sig=entry_sig, exit_sig=exit_sig,
             adx=adx_val, rsi=rsi_val,
         )
 

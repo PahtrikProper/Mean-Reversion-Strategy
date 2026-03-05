@@ -113,7 +113,6 @@ class TradingStatusMonitor:
                 lines.append(
                     f"  {symbol} [{trader.interval}m]  "
                     f"MA={ep.ma_len} BandMult={ep.band_mult:.2f}%  "
-                    f"Hold={xp.holding_days}d  "
                     f"TP={xp.tp_pct*100:.3f}%"
                 )
                 lines.append(

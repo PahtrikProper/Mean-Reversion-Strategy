@@ -11,7 +11,6 @@ Exit:
   TP:          low  <= entry * (1 - tp_pct)
   Trail Stop:  high >= min_low_since_entry + trail_atr_mult * ATR(trail_atr_period)
                (Jason McIntosh ATR trailing stop — SHORT version)
-  Time:        days_held >= holding_days
   Band exit:   low  drops below discount_k band (mirrors entry logic)
 """
 

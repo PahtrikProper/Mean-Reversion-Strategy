@@ -90,7 +90,6 @@ def _apply_config(cfg: dict) -> None:
         if "band_mult" in ec: C.DEFAULT_BAND_MULT = float(ec["band_mult"])
     if "exit" in cfg:
         xc = cfg["exit"]
-        if "holding_days" in xc: C.DEFAULT_HOLDING_DAYS = int(xc["holding_days"])
         if "tp_pct"       in xc: C.DEFAULT_TP_PCT       = float(xc["tp_pct"])
     if "optimizer" in cfg:
         if "n_trials" in cfg["optimizer"]:
@@ -105,7 +104,6 @@ def _apply_config(cfg: dict) -> None:
 _BLOCKED = (
     # Entry parameter field names (appear in log dicts / reopt dumps)
     "ma_len", "band_mult",
-    "holding_days",
     # indicator values printed each candle
     "ADX=", "RSI=",
     # per-candle parameter readout from status monitor
@@ -361,7 +359,6 @@ class _BotController:
                 self._emit("best_params", {
                     "ma_len":     _ep.ma_len,
                     "band_mult":  _ep.band_mult,
-                    "holding_days": _xp.holding_days,
                     "tp_pct":     _xp.tp_pct * 100.0,
                     "n_wins":     _n_wins,
                     "n_losses":   _n_losses,
@@ -545,7 +542,6 @@ class _PaperBotController:
                 self._emit("best_params", {
                     "ma_len":       _ep.ma_len,
                     "band_mult":    _ep.band_mult,
-                    "holding_days": _xp.holding_days,
                     "tp_pct":       _xp.tp_pct * 100.0,
                     "n_wins":       _n_wins,
                     "n_losses":     _n_losses,
@@ -1398,8 +1394,7 @@ class App(ctk.CTk):
             f"Band Mult: {d['band_mult']:.2f}%"
         )
         xp_str = (
-            f"Exit   ·  Hold ≤ {d['holding_days']}d  "
-            f"TP: {d['tp_pct']:.2f}%"
+            f"Exit   ·  TP: {d['tp_pct']:.2f}%  ·  Trail Stop (Jason McIntosh ATR)"
         )
         sign  = "+" if d["return_pct"] >= 0 else ""
         rc    = "#3fb950" if d["return_pct"] >= 0 else "#f85149"

@@ -114,13 +114,13 @@ ensure_csv(TRADES_CSV_PATH, [
     "pnl_1x_usdt", "pnl_pct",
     "result",
     "ma_len", "band_mult",
-    "holding_days", "tp_pct",
+    "tp_pct",
 ])
 
 # ── Param log ─────────────────────────────────────────────────────────────────
 ensure_csv(PARAMS_CSV_PATH, [
     "ts_utc", "event",
     "ma_len", "band_mult",
-    "holding_days", "tp_pct",
+    "tp_pct",
     "wallet", "sharpe_ratio",
 ])
