@@ -16,7 +16,7 @@ This file defines the exact trading strategy implemented in this codebase.
 
 ## Strategy Overview
 
-A mean-reversion SHORT strategy. It fades price extensions above a moving-average baseline using EMA-smoothed premium bands. The bot enters short when price touches a premium band and then drops back below it (band crossover), confirming the overextension is reversing. It exits when price reaches a discount band on the other side, or via TP / trail stop / time limit.
+A mean-reversion SHORT strategy. It fades price extensions above a moving-average baseline using EMA-smoothed premium bands. The bot enters short when price touches a premium band and then drops back below it (band crossover), confirming the overextension is reversing. It exits when price reaches a discount band on the other side, or via TP / trail stop (Jason McIntosh ATR).
 
 ---
 
@@ -90,8 +90,7 @@ resolve_entry_signals(raw_short, adx, rsi) -> int
 | 1 | **Liquidation** | mark_high >= liq_price | Bybit isolated SHORT formula; checked in backtest, detected via position=None in live |
 | 2 | **Take-Profit** | low <= entry * (1 - tp_pct) | Server-side TP in live (Bybit LastPrice trigger); direct check in backtest |
 | 3 | **Trail Stop** | high >= min_low_since_entry + trail_atr_mult × ATR | Jason McIntosh ATR trail — SHORT version |
-| 4 | **Time Exit** | days_held >= holding_days | Calendar days since entry |
-| 5 | **Band Exit** | discount band crossover-above-low | Mirror of entry signal, on discount bands + low |
+| 4 | **Band Exit** | discount band crossover-above-low | Mirror of entry signal, on discount bands + low |
 
 **This priority order is fixed.** It is implemented identically in both the backtester (`backtester.py`) and live trader (`live_trader.py`).
 
@@ -127,7 +126,6 @@ compute_exit_signals_raw(current_row, prev_row, current_low, current_high) -> in
 |-----------|-----------|---------|--------------|
 | `ma_len` | `EntryParams` | 100 | 2 – 300 (int) |
 | `band_mult` | `EntryParams` | 2.5 | 0.3 – 10.0 % (stored ×10 as int during search) |
-| `holding_days` | `ExitParams` | 30 | 1 – 30 (int) |
 | `tp_pct` | `ExitParams` | 0.0028 | 18 – 1100 bp × 0.0001 (0.18% – 11.00%) |
 
 ### Fixed Constants (never optimised)
@@ -184,7 +182,7 @@ If the score is ≤ 0 the old params are kept.
 ## Live Trading Architecture
 
 ### Data Sources
-- **Last-price klines** (`/v5/market/kline`): used for all signal generation, TP, trail stop, band exit, time exit
+- **Last-price klines** (`/v5/market/kline`): used for all signal generation, TP, trail stop, and band exit
 - **Mark-price klines** (`/v5/market/mark-price-kline`): used only for liquidation price checks
 - **Bybit WebSocket** (`wss://stream.bybit.com/v5/public/linear`): live candle stream (`kline.<interval>.<symbol>`) and mark price stream (`tickers.<symbol>`)
 
@@ -227,7 +225,7 @@ Paper trading uses `PaperTrader` (`paper_trader.py`) instead of `LiveRealTrader`
 
 - No API keys required — uses public REST and WebSocket only
 - Virtual wallet starts at `PAPER_STARTING_BALANCE` (default **$500 USDT**)
-- All five exit types are simulated locally (liquidation, TP, trail stop, time, band)
+- All four exit types are simulated locally (liquidation, TP, trail stop, band)
 - Slippage (`SLIPPAGE_TICKS = 1`) applied to all fills via `apply_slippage()` in `orders.py`
 - Taker and maker fees both simulated using per-symbol fee lookups from `helpers.py`
 
@@ -236,7 +234,7 @@ Paper trading uses `PaperTrader` (`paper_trader.py`) instead of `LiveRealTrader`
 ## Key Invariants — Do Not Change Without Explicit Instruction
 
 1. **SHORT only.** No long entries. No flip logic.
-2. **Exit priority is fixed**: Liquidation → TP → Trail Stop → Time → Band. This must be identical in `backtester.py` and `live_trader.py`.
+2. **Exit priority is fixed**: Liquidation → TP → Trail Stop → Band. This must be identical in `backtester.py` and `live_trader.py`.
 3. **No hard stop-loss.** The trail stop is the only stop mechanism.
 4. **Band EMA length is always 5.** This is not a parameter.
 5. **ADX threshold is always 25, RSI threshold is always 40.** These are not optimised.
@@ -256,7 +254,7 @@ Paper trading uses `PaperTrader` (`paper_trader.py`) instead of `LiveRealTrader`
 | `POLE_POSITION/core/indicators.py` | All indicator maths: RMA, EMA, ATR, ADX, RSI, band construction, crossover detection, signal generation |
 | `POLE_POSITION/core/orders.py` | Slippage simulation: `apply_slippage(price, side)` — 1 tick applied to all simulated fills |
 | `POLE_POSITION/backtest/backtester.py` | Historical backtest engine; single run and Monte Carlo |
-| `POLE_POSITION/optimize/optimizer.py` | Random-search optimiser over the 4-parameter space; `optimise_bayesian` is an alias for `optimise_params` |
+| `POLE_POSITION/optimize/optimizer.py` | Random-search optimiser over the 3-parameter space (ma_len, band_mult, tp_pct); `optimise_bayesian` is an alias for `optimise_params` |
 | `POLE_POSITION/trading/live_trader.py` | Live trading engine: WebSocket candle processing, entry/exit execution, re-optimisation |
 | `POLE_POSITION/trading/paper_trader.py` | Paper trading engine: simulates fills, fees, slippage, liquidation locally using public data |
 | `POLE_POSITION/trading/bybit_client.py` | Bybit REST + WebSocket client, order placement, execution polling |
