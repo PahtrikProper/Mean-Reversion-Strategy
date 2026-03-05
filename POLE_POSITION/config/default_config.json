@@ -1,0 +1,32 @@
+{
+  "_comment": "Mean Reversion — default strategy configuration",
+  "symbol": "HYPEUSDT",
+  "interval": "5",
+  "days_back_seed": 1,
+  "leverage": 10.0,
+  "starting_wallet": 100.0,
+  "fee_rate": 0.00055,
+  "maker_fee_rate": 0.0002,
+  "entry": {
+    "_comment": "Entry: high drops below premium_k band AND ADX<25 AND RSI>=40",
+    "ma_len": 100,
+    "band_mult": 2.5
+  },
+  "exit": {
+    "_comment": "Exit: TP, trail stop (Jason McIntosh ATR), time (holding_days), or band exit",
+    "holding_days": 30,
+    "tp_pct": 0.0028
+  },
+  "optimizer": {
+    "n_trials": 4000,
+    "min_trades": 3,
+    "ma_len_range": [2, 300],
+    "band_mult_range": [0.3, 10.0],
+    "tp_range_pct": [0.18, 0.38],
+    "exploit_ratio": 0.60,
+    "exploit_ma_len_radius": 15,
+    "exploit_band_mult_radius": 0.3,
+    "exploit_tp_radius_pct": 0.03,
+    "reopt_interval_hours": 8
+  }
+}
