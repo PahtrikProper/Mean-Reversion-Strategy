@@ -142,8 +142,20 @@ The GUI provides a full settings panel (expand **Settings** to configure):
 | Testing Period | Days of candle history used for optimisation (2–90 days) |
 | Number of Tests | Optimiser trials per symbol/interval pair |
 | Intervals | Candle sizes to test (1m, 3m, 5m, 15m, 30m, 60m) |
-| Symbols | Comma-separated list of Bybit USDT perpetual symbols to trade |
-| Leverage | Leverage multiplier for paper trading (1x–100x); live mode syncs from Bybit |
+| Symbols | Comma-separated list of Bybit USDT perpetual symbols — applies to both LIVE and PAPER modes |
+| Leverage | Leverage multiplier for paper trading (1x–100x); live mode reads the actual setting from Bybit |
+
+Every setting has a dedicated **Apply** button. Changes take effect only when Apply is clicked; they are also locked in automatically when **START** is pressed.
+
+Once the bot starts, five **stat cards** are displayed at all times:
+
+| Card | Description |
+|------|-------------|
+| Account Balance | Current wallet balance (USDT) |
+| P&L | Realized session P&L and account-level P&L |
+| Win Rate | Win percentage across all closed trades |
+| Total Trades | Number of completed trades this session |
+| Leverage | Confirmed leverage in use — fetched from Bybit in live mode, set from Settings in paper mode |
 
 Use the **LIVE / PAPER** toggle to switch modes, then press **START**.
 
@@ -298,8 +310,8 @@ DB maintenance (pruning, WAL checkpoint, ANALYZE, VACUUM) runs automatically in 
 ```bash
 pip install -r requirements-build.txt
 
-python build.py        # produces dist/MeanReversionTrader (GUI)
-python build.py --cli  # produces dist/MeanReversionTraderCLI
+python build.py        # produces dist/hype_trader      (GUI)
+python build.py --cli  # produces dist/hype_trader_cli  (CLI)
 ```
 
 The executable bundles all dependencies and runs without a Python installation.
