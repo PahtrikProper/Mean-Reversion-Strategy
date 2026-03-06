@@ -184,9 +184,9 @@ python main.py --paper --symbols XRPUSDT ETHUSDT
 ### Live trading startup sequence
 
 1. Load and validate API credentials (env vars → saved file → interactive prompt)
-2. Read live leverage from Bybit for each symbol
+2. Read actual leverage from Bybit for each symbol; log it and warn if it differs from the GUI/config setting
 3. Download seed candle history for each (symbol, interval) pair
-4. Run the parameter optimiser (~4 000 backtest trials per pair)
+4. Run the parameter optimiser (~4 000 backtest trials per pair); each pair logs `Testing {sym} {iv}m — leverage = Nx`
 5. Rank all pairs by score: `PnL% / (1 + max_drawdown%)`; launch the top-ranked trader per symbol
 6. Connect to Bybit WebSocket and begin live trading
 7. `TradingStatusMonitor` prints a full status table every 3 minutes
@@ -208,9 +208,9 @@ Default settings live in `engine/utils/constants.py`. You can override most of t
 
 ```json
 {
-  "symbol":          "XRPUSDT",
-  "leverage":        10,
-  "starting_wallet": 100,
+  "symbol":          "HYPEUSDT",
+  "leverage":        10.0,
+  "starting_wallet": 100.0,
   "entry": {
     "ma_len":    100,
     "band_mult": 2.5
@@ -226,26 +226,30 @@ Default settings live in `engine/utils/constants.py`. You can override most of t
 
 Place the file anywhere and pass it with `--config`.
 
+> **Note:** In the **GUI**, the `"symbol"` key in the config file only sets the initial default displayed in the Symbols field. The GUI Symbols field (and its Apply button) is the active source of truth for both LIVE and PAPER modes. In the **CLI**, `"symbol"` in the config sets the active symbol unless overridden by `--symbols`.
+
 ### Key constants
 
 | Constant | Default | Description |
 |----------|---------|-------------|
-| `SYMBOLS` | `["XRPUSDT"]` | Symbols for live trading |
-| `PAPER_SYMBOLS` | `["XRPUSDT", "ETHUSDT", "BTCUSDT", "ESPUSDT"]` | Symbols for paper trading |
+| `SYMBOLS` | `["XRPUSDT"]` | Active symbols — used by both LIVE and PAPER modes; overridden by the GUI Symbols field or `--symbols` CLI flag |
 | `CANDLE_INTERVALS` | `["1","3","5"]` | Candle sizes (minutes) tested during optimisation |
-| `DEFAULT_LEVERAGE` | `10.0` | Leverage for paper trading (live syncs from Bybit) |
+| `DEFAULT_LEVERAGE` | `10.0` | Leverage for paper trading (live mode reads the actual setting from Bybit) |
+| `STARTING_WALLET` | `100.0` | Simulated wallet used by the backtester and optimiser (not the paper trading wallet) |
 | `PAPER_STARTING_BALANCE` | `500.0` | Virtual wallet size for paper trading (USDT) |
 | `MAX_SYMBOL_FRACTION` | `0.45` | Max wallet fraction used as margin per trade |
+| `MAX_ACTIVE_SYMBOLS` | `1` | Maximum number of simultaneously active traders (one per symbol) |
 | `DAYS_BACK_SEED` | `1` | Days of history downloaded for seed + re-optimisation |
 | `INIT_TRIALS` | `4000` | Optimiser trials at startup |
-| `REOPT_INTERVAL_SEC` | `28800` | Re-optimise every 8 hours |
+| `REOPT_INTERVAL_SEC` | `28800` | Re-optimise every 8 hours when flat |
 | `LIVE_TP_SCALE` | `0.75` | Server-side TP is placed at 75% of backtested distance |
 | `TIME_TP_HOURS` | `20.0` | Hours after entry before the data-driven time TP kicks in |
 | `TIME_TP_FALLBACK_PCT` | `0.005` | 0.5% fallback TP when the DB has insufficient trade history |
 | `TIME_TP_SCALE` | `0.75` | Scale factor applied to the data-driven average TP % |
 | `FEE_RATE` | `0.00055` | Bybit taker fee rate |
 | `MAKER_FEE_RATE` | `0.0002` | Bybit maker fee rate |
-| `SLIPPAGE_TICKS` | `1` | Slippage ticks applied to simulated fills |
+| `SLIPPAGE_TICKS` | `1` | Slippage ticks applied to simulated fills (paper and backtest only) |
+| `RANDOM_SEED` | `None` | Optimiser RNG seed — `None` for non-deterministic runs; set to an integer for reproducible results |
 
 ---
 
