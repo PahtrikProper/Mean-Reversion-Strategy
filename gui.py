@@ -302,7 +302,9 @@ class _BotController:
                     self._log(f"Market data ready ({len(df_last)} candles)")
 
                     self._emit("status", "optimizing")
-                    self._log("Analyzing market conditions…")
+                    self._log(
+                        f"Testing {sym} {iv}m — leverage = {leverage_for(sym):.0f}x"
+                    )
 
                     # closure to capture loop vars
                     def _make_cb(pidx: int, n_pairs: int) -> Any:
@@ -480,7 +482,9 @@ class _PaperBotController:
                         self._log(f"Market data ready ({len(df_last)} candles)")
 
                         self._emit("status", "optimizing")
-                        self._log("Analyzing market conditions…")
+                        self._log(
+                            f"Testing {sym} {iv}m — leverage = {leverage_for(sym):.0f}x"
+                        )
 
                         def _make_cb(pidx: int, npairs: int) -> Any:
                             def cb(done: int, total: int) -> None:
