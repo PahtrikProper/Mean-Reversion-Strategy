@@ -275,11 +275,13 @@ class _BotController:
             # so the user can see exactly what leverage the live backtest uses.
             self._log("Verifying account settings…")
             _gui_lev = C.DEFAULT_LEVERAGE   # capture GUI/config value before overwrite
+            _lev_strs: list = []
             for sym in symbols:
                 lev = client.get_leverage(sym)
                 C.LEVERAGE_BY_SYMBOL[sym] = lev
                 C.DEFAULT_LEVERAGE        = lev
                 self._log(f"{sym}: Bybit leverage = {lev:.0f}x")
+                _lev_strs.append(f"{int(lev)}x")
                 if abs(lev - _gui_lev) > 0.5:
                     self._log(
                         f"⚠️  Leverage mismatch — Bybit returned {lev:.0f}x "
@@ -287,6 +289,7 @@ class _BotController:
                         f"Set leverage to {_gui_lev:.0f}x on Bybit for {sym} "
                         f"to match your paper backtest."
                     )
+            self._emit("leverage", " / ".join(_lev_strs) if _lev_strs else "--")
 
             # ── Optimisation phase ────────────────────────────────────────────
             n_pairs  = len(symbols) * len(intervals)
@@ -463,6 +466,7 @@ class _PaperBotController:
             for sym in symbols:
                 C.LEVERAGE_BY_SYMBOL[sym] = C.DEFAULT_LEVERAGE
                 self._log(f"{sym}: paper leverage = {C.DEFAULT_LEVERAGE:.0f}x")
+            self._emit("leverage", f"{int(C.DEFAULT_LEVERAGE)}x")
 
             n_pairs  = len(symbols) * len(intervals)
             pair_idx = 0
@@ -982,13 +986,14 @@ class App(ctk.CTk):
         # ── Stat cards ────────────────────────────────────────────────────────
         cards = ctk.CTkFrame(self, fg_color="transparent")
         cards.grid(row=5, column=0, sticky="ew", padx=10, pady=(0, 8))
-        for i in range(4):
+        for i in range(5):
             cards.grid_columnconfigure(i, weight=1)
 
         self._card_bal    = self._stat_card(cards, "Account Balance", "--",    0)
         self._card_pnl    = self._stat_card(cards, "P&L  R=Realized  A=Account", "--", 1)
         self._card_wr     = self._stat_card(cards, "Win Rate",         "--",    2)
         self._card_trades = self._stat_card(cards, "Total Trades",     "--",    3)
+        self._card_lev    = self._stat_card(cards, "Leverage",         "--",    4)
 
         # ── Best strategy panel (hidden until first optimisation completes) ──────
         self._best_outer = ctk.CTkFrame(self, fg_color="#161b22", corner_radius=8)
@@ -1413,12 +1418,16 @@ class App(ctk.CTk):
         elif kind == "best_params":
             self._update_best_params(msg[1])
 
+        elif kind == "leverage":
+            self._card_lev.configure(text=msg[1])
+
         elif kind == "error":
             self._append_log(f"Error: {msg[1]}")
             messagebox.showerror("Bot Error", msg[1])
 
         elif kind == "done":
             self._running = False
+            self._card_lev.configure(text="--")
             self._btn_start.configure(state="normal")
             self._btn_stop.configure(state="disabled")
             self._mode_seg.configure(state="normal")
