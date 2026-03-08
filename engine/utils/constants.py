@@ -65,7 +65,7 @@ TRAIL_ATR_MULT   = 3.0   # ATR multiplier (3× ATR above lowest low since entry)
 
 # ── Optimiser search ranges ───────────────────────────────────────────────────
 INIT_TRIALS          = 4000
-REOPT_INTERVAL_SEC   = 8 * 60 * 60   # re-optimise every 8 hours
+REOPT_INTERVAL_SEC   = 12 * 60 * 60  # re-optimise every 12 hours
 
 # Entry — MA length (RMA period for band centre line)
 OPT_MA_LEN_MIN        = 2
