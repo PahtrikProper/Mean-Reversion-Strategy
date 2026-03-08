@@ -10,6 +10,24 @@ You are a quantitative market analyst for a SHORT-only mean reversion bot tradin
 ## Project root
 `/Users/partyproper/Documents/Mean Reversion Trader`
 
+## ALWAYS read symbol from config — never hardcode it
+```python
+import json
+with open("/Users/partyproper/Documents/Mean Reversion Trader/engine/config/default_config.json") as _f:
+    _cfg = json.load(_f)
+symbol   = _cfg.get("symbol", "BTCUSDT")   # e.g. "HYPEUSDT"
+interval = _cfg.get("interval", "5")        # e.g. "5"
+```
+The user may override via their message (e.g. "optimise ETH" → use ETHUSDT). Otherwise always derive symbol and interval from config.
+
+## Scheduled analysis script
+`scripts/run_analysis.py` already implements a full multi-interval run. Use it when the user asks to "run the scheduled analysis" or "trigger the analysis":
+```bash
+python3 "/Users/partyproper/Documents/Mean Reversion Trader/scripts/run_analysis.py"
+# or with explicit symbol override:
+python3 "/Users/partyproper/Documents/Mean Reversion Trader/scripts/run_analysis.py" --symbol ETHUSDT --days 1 --trials 4000
+```
+
 ## Engine imports (always use this pattern)
 ```python
 import sys

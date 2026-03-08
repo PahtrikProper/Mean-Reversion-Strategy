@@ -107,7 +107,8 @@ class Config:
             if "tp_pct"       in xc: const_module.DEFAULT_TP_PCT       = float(xc["tp_pct"])
         if "optimizer" in cfg:
             oc = cfg["optimizer"]
-            if "n_trials" in oc: const_module.INIT_TRIALS = int(oc["n_trials"])
+            if "n_trials"    in oc: const_module.INIT_TRIALS      = int(oc["n_trials"])
+            if "min_trades"  in oc: const_module.OPT_MIN_TRADES   = int(oc["min_trades"])
 
 
 def run_live_trading():
