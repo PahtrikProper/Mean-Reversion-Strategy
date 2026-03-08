@@ -535,7 +535,8 @@ class _PaperBotController:
             # C.PAPER_SYMBOLS is the fixed multi-symbol scan list.
             symbols   = C.PAPER_SYMBOLS
             intervals = supported_intervals(C.CANDLE_INTERVALS)
-            gate      = bot.PositionGate()
+            # Paper mode: each symbol gets its own independent PositionGate so
+            # all four symbols can trade simultaneously without blocking each other.
 
             # Apply the user-selected leverage to all paper symbols.
             # Always overwrite — do not skip if a prior live session set a different value.
@@ -654,6 +655,8 @@ class _PaperBotController:
                 self._emit("done",)
                 return
 
+            # Paper mode: select the best interval per symbol for every symbol
+            # that passed the scan — no MAX_ACTIVE_SYMBOLS cap (paper = no real risk).
             ranked   = sorted(results.items(), key=lambda x: x[1]["score"], reverse=True)
             selected = []
             seen: set = set()
@@ -661,8 +664,7 @@ class _PaperBotController:
                 if sym not in seen:
                     selected.append((sym, d))
                     seen.add(sym)
-                if len(selected) == C.MAX_ACTIVE_SYMBOLS:
-                    break
+            # (all valid symbols, no limit)
 
             if selected:
                 _sym, _d = selected[0]
@@ -698,7 +700,7 @@ class _PaperBotController:
                     risk_df=d["risk_df"],
                     entry_params=d["entry_params"],
                     exit_params=d["exit_params"],
-                    gate=gate,
+                    gate=bot.PositionGate(),   # independent gate per symbol
                     interval=d["interval"],
                     instrument=d["instrument"],
                 )
