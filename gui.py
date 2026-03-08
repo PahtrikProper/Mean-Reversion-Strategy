@@ -13,7 +13,7 @@ import queue
 import sys
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 # ── Frozen / path setup ───────────────────────────────────────────────────────
@@ -1314,14 +1314,14 @@ class App(ctk.CTk):
         self._risk_open = not self._risk_open
 
     def _append_log(self, msg: str) -> None:
-        ts = datetime.utcnow().strftime("%H:%M:%S")
+        ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
         self._log_box.configure(state="normal")
         self._log_box.insert("end", f"[{ts}]  {msg}\n")
         self._log_box.see("end")
         self._log_box.configure(state="disabled")
 
     def _append_agent(self, msg: str, phase: str = "") -> None:
-        ts = datetime.utcnow().strftime("%H:%M:%S")
+        ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
         self._agent_box.configure(state="normal")
         self._agent_box.insert("end", f"[{ts}]  {msg}\n")
         self._agent_box.see("end")
@@ -1514,8 +1514,10 @@ class App(ctk.CTk):
 
     # ── Queue polling ─────────────────────────────────────────────────────────
     def _poll(self) -> None:
+        # Process at most 30 messages per cycle so the event loop stays
+        # responsive during high-throughput phases (e.g. optimiser).
         try:
-            while True:
+            for _ in range(30):
                 self._handle(self._q.get_nowait())
         except queue.Empty:
             pass
@@ -1708,36 +1710,42 @@ class App(ctk.CTk):
 
     # ── Trades table ──────────────────────────────────────────────────────────
     def _refresh_trades(self) -> None:
-        try:
-            self._load_trades()
-        except Exception:
-            pass
-        try:
-            self._load_equity()
-        except Exception:
-            pass
+        """Fetch DB rows on a background thread — never block the Tkinter loop."""
+        def _fetch() -> None:
+            import sqlite3
+            trades_rows: list = []
+            equity_rows: list = []
+            db_path = C.DB_PATH
+            if os.path.exists(db_path):
+                try:
+                    conn = sqlite3.connect(db_path, timeout=2)
+                    cur  = conn.cursor()
+                    cur.execute("""
+                        SELECT ts_utc, symbol, entry_price, exit_price, pnl_net, reason
+                        FROM trades ORDER BY ts_utc DESC LIMIT 20
+                    """)
+                    trades_rows = cur.fetchall()
+                    cur.execute("""
+                        SELECT ts_utc, symbol, event, balance
+                        FROM balance_snapshots ORDER BY ts_utc DESC LIMIT 40
+                    """)
+                    equity_rows = cur.fetchall()
+                    conn.close()
+                except Exception:
+                    pass
+            # Hand results back to the main thread — zero blocking
+            self.after(0, lambda: self._apply_db_rows(trades_rows, equity_rows))
+
+        threading.Thread(target=_fetch, daemon=True, name="gui-db-fetch").start()
         if self._running:
             self.after(10_000, self._refresh_trades)
 
-    def _load_trades(self) -> None:
-        import sqlite3
-        db_path = C.DB_PATH
-        if not os.path.exists(db_path):
-            return
-        try:
-            conn = sqlite3.connect(db_path, timeout=5)
-            cur  = conn.cursor()
-            cur.execute("""
-                SELECT ts_utc, symbol, entry_price, exit_price, pnl_net, reason
-                FROM trades
-                ORDER BY ts_utc DESC
-                LIMIT 20
-            """)
-            rows_db = cur.fetchall()
-            conn.close()
-        except Exception:
-            return
+    def _apply_db_rows(self, trades_rows: list, equity_rows: list) -> None:
+        """Apply fetched DB data to widgets (called on main thread via after())."""
+        self._apply_trades_rows(trades_rows)
+        self._apply_equity_rows(equity_rows)
 
+    def _apply_trades_rows(self, rows_db: list) -> None:
         for item in self._tree.get_children():
             self._tree.delete(item)
 
@@ -1757,26 +1765,8 @@ class App(ctk.CTk):
         self._tree.tag_configure("win",  foreground="#3fb950")
         self._tree.tag_configure("loss", foreground="#f85149")
 
-    def _load_equity(self) -> None:
-        """Populate the Equity tab with balance snapshots from SQLite."""
-        import sqlite3
-        db_path = C.DB_PATH
-        if not os.path.exists(db_path):
-            return
-        try:
-            conn = sqlite3.connect(db_path, timeout=5)
-            cur  = conn.cursor()
-            cur.execute("""
-                SELECT ts_utc, symbol, event, balance
-                FROM balance_snapshots
-                ORDER BY ts_utc DESC
-                LIMIT 40
-            """)
-            rows_db = cur.fetchall()
-            conn.close()
-        except Exception:
-            return
-
+    def _apply_equity_rows(self, rows_db: list) -> None:
+        """Populate the Equity tab from pre-fetched balance_snapshots rows."""
         if not rows_db:
             return
 
