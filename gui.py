@@ -529,7 +529,10 @@ class _PaperBotController:
             if cfg:
                 _apply_config(cfg)
 
-            symbols   = C.SYMBOLS
+            # Paper mode always scans the full set of test symbols.
+            # C.SYMBOLS tracks the best live symbol (from market-analyst);
+            # C.PAPER_SYMBOLS is the fixed multi-symbol scan list.
+            symbols   = C.PAPER_SYMBOLS
             intervals = supported_intervals(C.CANDLE_INTERVALS)
             gate      = bot.PositionGate()
 
@@ -537,7 +540,7 @@ class _PaperBotController:
             # Always overwrite — do not skip if a prior live session set a different value.
             for sym in symbols:
                 C.LEVERAGE_BY_SYMBOL[sym] = C.DEFAULT_LEVERAGE
-                self._log(f"{sym}: paper leverage = {C.DEFAULT_LEVERAGE:.0f}x")
+            self._log(f"Paper leverage = {int(C.DEFAULT_LEVERAGE)}x  (all symbols)")
             self._emit("leverage", f"{int(C.DEFAULT_LEVERAGE)}x")
 
             n_pairs  = len(symbols) * len(intervals)
