@@ -1,6 +1,6 @@
 {
   "_comment": "Mean Reversion — default strategy configuration",
-  "symbol": "HYPEUSDT",
+  "symbol": "XRPUSDT",
   "interval": "5",
   "days_back_seed": 1,
   "leverage": 10.0,
