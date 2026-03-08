@@ -1332,6 +1332,10 @@ class App(ctk.CTk):
             C.API_KEY    = k
             C.API_SECRET = s
 
+        # Lock in the symbol selection FIRST — before disabling the entry
+        # widget, so CTkEntry.get() still returns the typed value.
+        self._apply_symbols()
+
         self._btn_start.configure(state="disabled")
         self._btn_stop.configure(state="normal")
         self._mode_seg.configure(state="disabled")
@@ -1353,9 +1357,6 @@ class App(ctk.CTk):
         self._prog_bar.set(0)
 
         self._running = True
-        # Lock in whatever is currently in the Symbols entry field so the bot
-        # thread sees the user's selection even if they didn't click Apply.
-        self._apply_symbols()
         if self._mode == "PAPER":
             self._ctrl = _PaperBotController(self._q, self._stop_evt)
         else:
