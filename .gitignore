@@ -3,6 +3,8 @@ __pycache__/
 *.pyc
 *.pyo
 .claude/
+!.claude/agents/
+!.claude/agents/**
 paper_logs/
 *.log
 .DS_Store
