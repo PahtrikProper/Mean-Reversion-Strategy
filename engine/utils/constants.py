@@ -11,7 +11,7 @@ CATEGORY         = "linear"
 
 # ── Paper trading ─────────────────────────────────────────────────────────────
 PAPER_STARTING_BALANCE = 500.0
-PAPER_SYMBOLS = ["XRPUSDT", "ETHUSDT", "BTCUSDT", "ESPUSDT"]
+PAPER_SYMBOLS = ["XRPUSDT", "ETHUSDT", "ESPUSDT", "BTCUSDT"]
 
 DAYS_BACK_SEED    = 1                        # history window for seed + re-opt
 STARTING_WALLET   = 100.0

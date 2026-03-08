@@ -81,13 +81,14 @@ def _load_config() -> Optional[dict]:
 def _apply_config(cfg: dict) -> None:
     """Apply non-symbol config values at bot-run time.
 
-    Symbols are intentionally excluded here — the GUI Symbols field is the
-    sole source of truth.  C.SYMBOLS is seeded once in App.__init__ and
-    updated only by _apply_symbols() / _start_bot().
+    The "symbol" key is not applied here — C.SYMBOLS / C.PAPER_SYMBOLS are
+    seeded once in App.__init__ from the config file and then stay fixed for
+    the duration of the bot run.  The market-analyst agent is the sole
+    authority for choosing which symbol to trade.
     """
     if not cfg:
         return
-    # NOTE: "symbol" key is intentionally NOT applied here.
+    # NOTE: "symbol" key is intentionally NOT applied here — seeded at init.
     if "leverage"        in cfg: C.DEFAULT_LEVERAGE = float(cfg["leverage"])
     if "starting_wallet" in cfg: C.STARTING_WALLET  = float(cfg["starting_wallet"])
     if "entry" in cfg:
@@ -745,15 +746,13 @@ class App(ctk.CTk):
         logging.getLogger().addHandler(handler)
         logging.getLogger().setLevel(logging.INFO)
 
-        # Seed C.SYMBOLS from the config file BEFORE building the UI so the
-        # Symbols entry field shows the correct default.  The GUI is the sole
-        # source of truth for symbols at runtime — _apply_config() no longer
-        # overwrites C.SYMBOLS during a bot run.
+        # Seed C.SYMBOLS from the config file so the live trader picks up
+        # whichever symbol the market-analyst agent last identified as best.
+        # PAPER_SYMBOLS is always the full 4-symbol scan list from constants.py.
         _early_cfg = _load_config()
         if _early_cfg:
             if "symbol" in _early_cfg:
-                C.SYMBOLS       = [_early_cfg["symbol"]]
-                C.PAPER_SYMBOLS = [_early_cfg["symbol"]]
+                C.SYMBOLS = [_early_cfg["symbol"]]   # live only — paper scans all 4
             if "leverage"        in _early_cfg: C.DEFAULT_LEVERAGE = float(_early_cfg["leverage"])
             if "starting_wallet" in _early_cfg: C.STARTING_WALLET  = float(_early_cfg["starting_wallet"])
 
@@ -974,38 +973,11 @@ class App(ctk.CTk):
         )
         self._lbl_intervals_status.grid(row=3, column=3, padx=14, pady=(0, 12), sticky="w")
 
-        # ── Symbols row ───────────────────────────────────────────────────────
-        ctk.CTkLabel(
-            self._risk_body, text="Symbols:",
-            font=ctk.CTkFont(size=13), text_color="#c9d1d9",
-        ).grid(row=4, column=0, padx=(14, 8), pady=(0, 12), sticky="w")
-
-        self._symbols_entry = ctk.CTkEntry(
-            self._risk_body, width=200,
-            placeholder_text="e.g. BTCUSDT, ETHUSDT",
-            font=ctk.CTkFont(size=13),
-        )
-        self._symbols_entry.insert(0, ", ".join(C.SYMBOLS))
-        self._symbols_entry.grid(row=4, column=1, padx=(0, 8), pady=(0, 12), sticky="w")
-
-        self._btn_apply_symbols = ctk.CTkButton(
-            self._risk_body, text="Apply", width=80,
-            command=self._apply_symbols,
-        )
-        self._btn_apply_symbols.grid(row=4, column=2, padx=(0, 14), pady=(0, 12), sticky="w")
-
-        self._lbl_symbols_status = ctk.CTkLabel(
-            self._risk_body,
-            text=f"Current: {', '.join(C.SYMBOLS)}",
-            text_color="#8b949e", font=ctk.CTkFont(size=12),
-        )
-        self._lbl_symbols_status.grid(row=4, column=3, padx=14, pady=(0, 12), sticky="w")
-
         # ── Leverage row (paper trading — live syncs from Bybit) ──────────────
         ctk.CTkLabel(
             self._risk_body, text="Leverage:",
             font=ctk.CTkFont(size=13), text_color="#c9d1d9",
-        ).grid(row=5, column=0, padx=(14, 8), pady=(0, 12), sticky="w")
+        ).grid(row=4, column=0, padx=(14, 8), pady=(0, 12), sticky="w")
 
         _lev_options = ["1x", "2x", "3x", "5x", "10x", "15x", "20x", "25x", "50x", "75x", "100x"]
         _lev_default = f"{int(C.DEFAULT_LEVERAGE)}x"
@@ -1018,20 +990,20 @@ class App(ctk.CTk):
             variable=self._leverage_var,
             width=90,
         )
-        self._leverage_menu.grid(row=5, column=1, padx=(0, 8), pady=(0, 12))
+        self._leverage_menu.grid(row=4, column=1, padx=(0, 8), pady=(0, 12))
 
         self._btn_apply_leverage = ctk.CTkButton(
             self._risk_body, text="Apply", width=80,
             command=self._apply_leverage,
         )
-        self._btn_apply_leverage.grid(row=5, column=2, padx=(0, 14), pady=(0, 12), sticky="w")
+        self._btn_apply_leverage.grid(row=4, column=2, padx=(0, 14), pady=(0, 12), sticky="w")
 
         self._lbl_leverage_status = ctk.CTkLabel(
             self._risk_body,
             text=f"Current: {int(C.DEFAULT_LEVERAGE)}x  (paper — live syncs from Bybit)",
             text_color="#8b949e", font=ctk.CTkFont(size=12),
         )
-        self._lbl_leverage_status.grid(row=5, column=3, padx=14, pady=(0, 12), sticky="w")
+        self._lbl_leverage_status.grid(row=4, column=3, padx=14, pady=(0, 12), sticky="w")
 
 
         # ── Controls ──────────────────────────────────────────────────────────
@@ -1465,20 +1437,6 @@ class App(ctk.CTk):
                 text_color="#3fb950",
             )
 
-    def _apply_symbols(self) -> None:
-        raw = self._symbols_entry.get().strip()
-        if not raw:
-            return
-        syms = [s.strip().upper() for s in raw.split(",") if s.strip()]
-        if not syms:
-            return
-        C.SYMBOLS       = syms
-        C.PAPER_SYMBOLS = syms
-        self._lbl_symbols_status.configure(
-            text=f"Current: {', '.join(syms)}",
-            text_color="#3fb950",
-        )
-
     def _apply_leverage(self) -> None:
         raw = self._leverage_var.get().replace("x", "").strip()
         try:
@@ -1521,10 +1479,6 @@ class App(ctk.CTk):
             C.API_KEY    = k
             C.API_SECRET = s
 
-        # Lock in the symbol selection FIRST — before disabling the entry
-        # widget, so CTkEntry.get() still returns the typed value.
-        self._apply_symbols()
-
         self._btn_start.configure(state="disabled")
         self._btn_stop.configure(state="normal")
         self._mode_seg.configure(state="disabled")
@@ -1538,8 +1492,6 @@ class App(ctk.CTk):
         for _cb in self._iv_checks:
             _cb.configure(state="disabled")
         self._btn_apply_intervals.configure(state="disabled")
-        self._symbols_entry.configure(state="disabled")
-        self._btn_apply_symbols.configure(state="disabled")
         self._leverage_menu.configure(state="disabled")
         self._btn_apply_leverage.configure(state="disabled")
         self._prog_outer.grid()
@@ -1635,8 +1587,6 @@ class App(ctk.CTk):
             for _cb in self._iv_checks:
                 _cb.configure(state="normal")
             self._btn_apply_intervals.configure(state="normal")
-            self._symbols_entry.configure(state="normal")
-            self._btn_apply_symbols.configure(state="normal")
             self._leverage_menu.configure(state="normal")
             self._btn_apply_leverage.configure(state="normal")
             self._set_status("idle")
