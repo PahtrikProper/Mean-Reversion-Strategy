@@ -30,7 +30,7 @@ python3 "/Users/partyproper/Documents/Mean Reversion Trader/scripts/run_analysis
 
 ## Engine imports (always use this pattern)
 ```python
-import sys
+import sys, math
 sys.path.insert(0, "/Users/partyproper/Documents/Mean Reversion Trader")
 from engine.trading.bybit_client import fetch_last_klines, fetch_mark_klines, fetch_risk_tiers
 from engine.core.indicators import build_indicators, compute_entry_signals_raw, resolve_entry_signals, ADX_THRESHOLD, RSI_NEUTRAL_LO
@@ -43,6 +43,13 @@ import numpy as np
 from datetime import datetime, timezone
 import time
 ```
+
+## Default symbols for multi-symbol analysis
+When the user asks to scan multiple symbols, find "the best symbol right now", or no specific symbol is mentioned, scan all four default symbols and rank by score:
+```python
+SCAN_SYMBOLS = ["XRPUSDT", "ETHUSDT", "ESPUSDT", "BTCUSDT"]
+```
+Loop over `SCAN_SYMBOLS`, run optimisation + signal scan for each, then recommend the highest-scoring symbol. The bot trades **one symbol at a time** — your job is to identify which one is best suited right now.
 
 ## Strategy rules
 - Entry: premium band crossover (high drops below premium_k) + ADX < 25 + RSI >= 40
@@ -94,6 +101,52 @@ for i in range(1, len(df)):
         if f > 0: fired += 1
         elif adx >= ADX_THRESHOLD: adx_blocked += 1
         else: rsi_blocked += 1
+```
+
+## Pre-trade regime classification — run AFTER downloading data, BEFORE optimisation
+Classify the current market regime before spending trials on optimisation. A trending regime will cause the ADX gate to block most entries — knowing this upfront guides parameter choices and symbol selection.
+
+```python
+def _classify_regime(df_ind: pd.DataFrame) -> dict:
+    adx_s = df_ind["adx"].dropna()
+    if len(adx_s) < 20:
+        return {"regime": "UNKNOWN", "avg_adx": float("nan"),
+                "pct_trending": float("nan"), "hv_rank": float("nan"), "current_hv": float("nan")}
+    recent    = adx_s.tail(50)
+    avg_adx   = float(recent.mean())
+    pct_trend = float((recent >= ADX_THRESHOLD).mean() * 100)
+    # HV-20 percentile rank
+    hv_rank = current_hv = float("nan")
+    if "hv_20" in df_ind.columns:
+        hv_s = df_ind["hv_20"].dropna()
+        if len(hv_s) >= 20:
+            current_hv = float(hv_s.iloc[-1])
+            hv_rank    = float((hv_s <= current_hv).mean() * 100)
+    if   pct_trend >= 60 or avg_adx >= 22: regime = "TRENDING"
+    elif pct_trend <= 30 and avg_adx <= 17: regime = "RANGING"
+    else:                                   regime = "MIXED"
+    return {"regime": regime, "avg_adx": avg_adx, "pct_trending": pct_trend,
+            "current_hv": current_hv, "hv_rank": hv_rank}
+
+_df_reg = build_indicators(df_last.copy(), ma_len=50, band_mult=1.0)  # neutral params for regime check
+reg     = _classify_regime(_df_reg)
+print(f"\n── Regime Check ({symbol} {interval}m) ───────────────────────────────────────────")
+print(f"  Regime     : {reg['regime']}")
+print(f"  Avg ADX    : {reg['avg_adx']:.1f}  |  ADX≥{ADX_THRESHOLD} on {reg['pct_trending']:.0f}% of last 50 bars")
+if not math.isnan(reg['hv_rank']):
+    print(f"  HV-20      : {reg['current_hv']:.5f}  (rank: {reg['hv_rank']:.0f}th percentile)")
+if reg["regime"] == "TRENDING":
+    print(f"  ⚠  TRENDING — most entries will be ADX-blocked. Recommendations:")
+    print(f"     • Try wider band_mult (≥ 1.0%) to find stronger pullbacks")
+    print(f"     • Try a shorter candle window or a different symbol from SCAN_SYMBOLS")
+elif reg["regime"] == "RANGING":
+    print(f"  ✓  RANGING — ideal mean-reversion conditions. Proceed with optimisation.")
+else:
+    print(f"  ~  MIXED — strategy viable; expect moderate ADX gating during trending bursts.")
+if not math.isnan(reg['hv_rank']):
+    if   reg['hv_rank'] > 80: print(f"  ⚠  HIGH volatility ({reg['hv_rank']:.0f}th pct) — widen TP to capture larger moves.")
+    elif reg['hv_rank'] < 20: print(f"  ℹ  LOW volatility ({reg['hv_rank']:.0f}th pct) — tight TP likely optimal.")
+print(f"─────────────────────────────────────────────────────────────────────────────────")
 ```
 
 ## Signal verification — run AFTER optimisation

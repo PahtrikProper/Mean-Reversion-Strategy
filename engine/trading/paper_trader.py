@@ -127,6 +127,7 @@ class PaperTrader:
         self._halted: bool             = False          # True when max-loss fired
         self._halt_ts: Optional[float] = None           # timestamp when halt started
         self._last_drought_log: float  = 0.0            # cooldown for drought events
+        self._shadow_positions: list   = []             # virtual "what if" trades for gate-blocked signals
 
         if len(df_mark_seed) == 0:
             raise RuntimeError("No mark seed data")
@@ -748,6 +749,50 @@ class PaperTrader:
             current_low=l, current_high=h,
         )
 
+        # ── Shadow position tracking — check virtual "what if" trades ─────────
+        if self._shadow_positions:
+            _sh_to_remove = []
+            for _sh in self._shadow_positions:
+                _sh["candles"] += 1
+                _sh["min_low"]  = min(_sh["min_low"], l)
+                _sh_atr = atr_val if atr_val > 0 else _sh.get("atr_at_entry", 0.0)
+                if _sh_atr > 0:
+                    _sh["trail_stop"] = _sh["min_low"] + float(self.exit_params.trail_atr_mult) * _sh_atr
+                _sh_outcome = None
+                _sh_out_px  = None
+                if l <= _sh["tp_price"]:
+                    _sh_outcome = "TP_HIT";       _sh_out_px = _sh["tp_price"]
+                elif h >= _sh["trail_stop"]:
+                    _sh_outcome = "TRAIL_STOPPED"; _sh_out_px = _sh["trail_stop"]
+                elif _sh["candles"] >= 100:
+                    _sh_outcome = "EXPIRED"
+                if _sh_outcome:
+                    if _sh_outcome != "EXPIRED":
+                        _sh_pnl = ((_sh["entry_price"] - _sh_out_px)
+                                   / _sh["entry_price"] * float(self.leverage) * 100.0)
+                        _db.log_missed_trade(
+                            entry_ts=_sh["entry_ts"], resolved_ts=ts_utc,
+                            symbol=self.symbol, interval=self.interval,
+                            blocked_by=_sh["blocked_by"],
+                            entry_price=_sh["entry_price"], tp_price=_sh["tp_price"],
+                            trail_stop_at_resolution=_sh["trail_stop"],
+                            band=_sh["band"],
+                            adx_at_entry=_sh.get("adx_at_entry"),
+                            rsi_at_entry=_sh.get("rsi_at_entry"),
+                            outcome=_sh_outcome,
+                            outcome_pnl_pct=round(_sh_pnl, 4),
+                            candles_elapsed=_sh["candles"],
+                        )
+                        if _sh_outcome == "TP_HIT":
+                            log.info(
+                                f"[PAPER][{self.symbol}] 🔍 Skipped trade would have been profitable  "
+                                f"blocked_by={_sh['blocked_by']}  pnl≈{_sh_pnl:+.2f}%  "
+                                f"band={_sh['band']}  ({_sh['candles']} candles after signal)"
+                            )
+                    _sh_to_remove.append(_sh)
+            for _sh in _sh_to_remove:
+                self._shadow_positions.remove(_sh)
+
         # ── DB: candle analytics ──
         _db.log_candle_analytics(
             ts_utc=ts_utc, symbol=self.symbol, interval=self.interval,
@@ -774,6 +819,18 @@ class PaperTrader:
             _blocked_entry = None
             if _raw_short > 0 and _final_short == 0:
                 _blocked_entry = "ADX" if adx_val >= 25 else "RSI"
+                # ── Shadow for indicator-blocked signal ───────────────────────
+                if self.position is None and atr_val > 0 and len(self._shadow_positions) < 5:
+                    _sh_ep  = c
+                    _sh_tp  = _sh_ep * (1.0 - float(self.exit_params.tp_pct) * LIVE_TP_SCALE)
+                    _sh_trl = l + float(self.exit_params.trail_atr_mult) * atr_val
+                    self._shadow_positions.append({
+                        "entry_ts": ts_utc, "entry_price": _sh_ep,
+                        "tp_price": _sh_tp, "trail_stop": _sh_trl,
+                        "min_low": l, "band": _raw_short, "blocked_by": _blocked_entry,
+                        "candles": 0, "adx_at_entry": adx_val,
+                        "rsi_at_entry": rsi_val, "atr_at_entry": atr_val,
+                    })
             _blocked = _blocked_entry
 
         _db.log_signal(
@@ -968,8 +1025,32 @@ class PaperTrader:
                     self._min_low_since_entry = l
             else:
                 log.warning(f"[PAPER][{ts_utc}] Entry signal — wallet {self.wallet:.4f} < {MIN_WALLET_USDT}")
+                # ── Shadow for wallet-blocked signal ─────────────────────
+                if atr_val > 0 and len(self._shadow_positions) < 5:
+                    _sh_ep  = c
+                    _sh_tp  = _sh_ep * (1.0 - float(self.exit_params.tp_pct) * LIVE_TP_SCALE)
+                    _sh_trl = l + float(self.exit_params.trail_atr_mult) * atr_val
+                    self._shadow_positions.append({
+                        "entry_ts": ts_utc, "entry_price": _sh_ep,
+                        "tp_price": _sh_tp, "trail_stop": _sh_trl,
+                        "min_low": l, "band": _raw_short, "blocked_by": "WALLET",
+                        "candles": 0, "adx_at_entry": adx_val,
+                        "rsi_at_entry": rsi_val, "atr_at_entry": atr_val,
+                    })
         elif entry_sig and self.position is not None:
             log.info(f"[PAPER][{ts_utc}] Entry signal — already SHORT (no pyramiding)")
+            # ── Shadow for position-blocked signal ───────────────────────
+            if atr_val > 0 and len(self._shadow_positions) < 5:
+                _sh_ep  = c
+                _sh_tp  = _sh_ep * (1.0 - float(self.exit_params.tp_pct) * LIVE_TP_SCALE)
+                _sh_trl = l + float(self.exit_params.trail_atr_mult) * atr_val
+                self._shadow_positions.append({
+                    "entry_ts": ts_utc, "entry_price": _sh_ep,
+                    "tp_price": _sh_tp, "trail_stop": _sh_trl,
+                    "min_low": l, "band": _raw_short, "blocked_by": "POSITION",
+                    "candles": 0, "adx_at_entry": adx_val,
+                    "rsi_at_entry": rsi_val, "atr_at_entry": atr_val,
+                })
 
         # ── Display ──
         self._display_candle_close(

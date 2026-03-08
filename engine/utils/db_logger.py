@@ -349,6 +349,25 @@ def _create_tables() -> None:
         mark_price REAL    NOT NULL
     );
 
+    -- ── Missed trades (blocked signals that would have been profitable) ────────
+    CREATE TABLE IF NOT EXISTS missed_trades (
+        id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+        entry_ts                 TEXT    NOT NULL,
+        resolved_ts              TEXT,
+        symbol                   TEXT    NOT NULL,
+        interval                 TEXT,
+        blocked_by               TEXT,   -- 'ADX','RSI','POSITION','WALLET'
+        entry_price              REAL,
+        tp_price                 REAL,
+        trail_stop_at_resolution REAL,
+        band                     INTEGER,
+        adx_at_entry             REAL,
+        rsi_at_entry             REAL,
+        outcome                  TEXT,   -- 'TP_HIT','TRAIL_STOPPED'
+        outcome_pnl_pct          REAL,   -- leveraged PnL% that would have been achieved
+        candles_elapsed          INTEGER
+    );
+
     -- ── Indexes ──────────────────────────────────────────────────────────────
     CREATE INDEX IF NOT EXISTS idx_candles_sym      ON candles           (symbol, interval, ts_utc);
     CREATE INDEX IF NOT EXISTS idx_analytics_sym    ON candle_analytics  (symbol, interval, ts_utc);
@@ -362,6 +381,7 @@ def _create_tables() -> None:
     CREATE INDEX IF NOT EXISTS idx_balance_sym      ON balance_snapshots (symbol, ts_utc);
     CREATE INDEX IF NOT EXISTS idx_events_sym       ON events            (symbol, ts_utc);
     CREATE INDEX IF NOT EXISTS idx_mp_ticks_sym     ON mark_price_ticks  (symbol, ts_utc);
+    CREATE INDEX IF NOT EXISTS idx_missed_sym       ON missed_trades     (symbol, entry_ts);
     """)
 
 
@@ -868,6 +888,43 @@ def log_mark_price_tick(
     )
 
 
+def log_missed_trade(
+    entry_ts: str,
+    resolved_ts: str,
+    symbol: str,
+    interval: str,
+    blocked_by: str,
+    entry_price: float,
+    tp_price: float,
+    trail_stop_at_resolution: Optional[float],
+    band: int,
+    adx_at_entry: Optional[float],
+    rsi_at_entry: Optional[float],
+    outcome: str,
+    outcome_pnl_pct: float,
+    candles_elapsed: int,
+) -> None:
+    """Log a signal that was blocked by a gate but would have resolved profitably or as a loss.
+
+    outcome is 'TP_HIT' (profitable) or 'TRAIL_STOPPED' (stopped out).
+    outcome_pnl_pct is the leveraged percentage P&L that would have been achieved.
+    """
+    _execute(
+        """INSERT INTO missed_trades (
+            entry_ts, resolved_ts, symbol, interval, blocked_by,
+            entry_price, tp_price, trail_stop_at_resolution,
+            band, adx_at_entry, rsi_at_entry,
+            outcome, outcome_pnl_pct, candles_elapsed
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            entry_ts, resolved_ts, symbol, interval, blocked_by,
+            _safe(entry_price), _safe(tp_price), _safe(trail_stop_at_resolution),
+            band, _safe(adx_at_entry), _safe(rsi_at_entry),
+            outcome, _safe(outcome_pnl_pct), candles_elapsed,
+        ),
+    )
+
+
 def compute_time_tp_pct(
     symbol: str,
     min_hold_hours: float = 20.0,
@@ -1049,6 +1106,7 @@ _RETENTION_DAYS: dict = {
     "params":              365,
     "optimization_runs":   365,
     "monte_carlo_runs":    365,
+    "missed_trades":        90,   # what-if shadow position outcomes
 }
 
 # Tables that have a ts_utc column used for time-based pruning
