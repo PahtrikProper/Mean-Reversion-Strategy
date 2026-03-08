@@ -713,8 +713,13 @@ class App(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Mean Reversion Trader")
-        self.geometry("980x1060")
-        self.minsize(820, 820)
+        # Auto-fit to screen — leave room for the macOS/Windows taskbar
+        _sw = self.winfo_screenwidth()
+        _sh = self.winfo_screenheight()
+        _win_w = min(1020, max(860, _sw - 40))
+        _win_h = min(980,  max(780, _sh - 80))
+        self.geometry(f"{_win_w}x{_win_h}")
+        self.minsize(820, 720)
         self.resizable(True, True)
 
         self._q        = queue.Queue()
@@ -750,10 +755,9 @@ class App(ctk.CTk):
     # ── UI Construction ───────────────────────────────────────────────────────
     def _build_ui(self) -> None:
         self.grid_columnconfigure(0, weight=1)
-        # Row weights: trades table (10), agent panel (12), activity log (14) expand
+        # Row weights: trades table (10) and bottom tabview (11) expand
         self.grid_rowconfigure(10, weight=1)
-        self.grid_rowconfigure(12, weight=1)
-        self.grid_rowconfigure(14, weight=1)
+        self.grid_rowconfigure(11, weight=2)
 
         # ── Header ────────────────────────────────────────────────────────────
         hdr = ctk.CTkFrame(self, height=60, fg_color="#0d1117", corner_radius=0)
@@ -1205,47 +1209,60 @@ class App(ctk.CTk):
         self._tree.grid(row=0, column=0, sticky="nsew", padx=(6, 0), pady=6)
         vsb.grid(row=0, column=1, sticky="ns", pady=6, padx=(0, 4))
 
-        # ── Agent analysis panel header ───────────────────────────────────────
-        agent_hdr = ctk.CTkFrame(self, fg_color="#161b22", corner_radius=0, height=32)
-        agent_hdr.grid(row=11, column=0, sticky="ew", padx=10, pady=(0, 0))
-        agent_hdr.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(
-            agent_hdr, text="🤖  AGENT ANALYSIS",
-            font=ctk.CTkFont(size=11, weight="bold"), text_color="#58a6ff",
-        ).pack(side="left", padx=14, pady=(8, 4))
-        self._lbl_agent_phase = ctk.CTkLabel(
-            agent_hdr, text="",
-            font=ctk.CTkFont(size=11), text_color="#8b949e",
-        )
-        self._lbl_agent_phase.pack(side="left", padx=(0, 14), pady=(8, 4))
+        # ── Bottom tabview: Agent Analysis  +  Activity ───────────────────────
+        _mono = ctk.CTkFont(family="Courier New" if sys.platform == "win32" else "Courier", size=11)
 
-        # ── Agent analysis log ────────────────────────────────────────────────
-        self._agent_box = ctk.CTkTextbox(
-            self, height=120,
-            font=ctk.CTkFont(family="Courier New" if sys.platform == "win32" else "Courier", size=11),
-            fg_color="#0d1117", text_color="#79c0ff",
-            corner_radius=8,
+        self._bottom_tabs = ctk.CTkTabview(
+            self,
+            fg_color="#0d1117",
+            segmented_button_fg_color="#161b22",
+            segmented_button_selected_color="#1f6feb",
+            segmented_button_selected_hover_color="#388bfd",
+            segmented_button_unselected_color="#161b22",
+            segmented_button_unselected_hover_color="#21262d",
+            text_color="#c9d1d9",
+            text_color_disabled="#6e7681",
         )
-        self._agent_box.grid(row=12, column=0, sticky="nsew", padx=10, pady=(0, 6))
+        self._bottom_tabs.grid(row=11, column=0, sticky="nsew", padx=10, pady=(4, 8))
+
+        # ── Agent tab ─────────────────────────────────────────────────────────
+        self._bottom_tabs.add("🤖  Agent Analysis")
+        _agent_tab = self._bottom_tabs.tab("🤖  Agent Analysis")
+        _agent_tab.grid_columnconfigure(0, weight=1)
+        _agent_tab.grid_rowconfigure(1, weight=1)
+
+        self._lbl_agent_phase = ctk.CTkLabel(
+            _agent_tab, text="",
+            font=ctk.CTkFont(size=10), text_color="#58a6ff",
+        )
+        self._lbl_agent_phase.grid(row=0, column=0, sticky="w", padx=4, pady=(2, 0))
+
+        self._agent_box = ctk.CTkTextbox(
+            _agent_tab,
+            font=_mono,
+            fg_color="#0d1117", text_color="#79c0ff",
+            corner_radius=6,
+        )
+        self._agent_box.grid(row=1, column=0, sticky="nsew", padx=0, pady=(2, 0))
         self._agent_box.configure(state="disabled")
 
-        # ── Activity log header ───────────────────────────────────────────────
-        log_hdr = ctk.CTkFrame(self, fg_color="#161b22", corner_radius=0, height=32)
-        log_hdr.grid(row=13, column=0, sticky="ew", padx=10, pady=(0, 0))
-        ctk.CTkLabel(
-            log_hdr, text="ACTIVITY",
-            font=ctk.CTkFont(size=11, weight="bold"), text_color="#8b949e",
-        ).pack(anchor="w", padx=14, pady=(8, 4))
+        # ── Activity tab ──────────────────────────────────────────────────────
+        self._bottom_tabs.add("Activity")
+        _act_tab = self._bottom_tabs.tab("Activity")
+        _act_tab.grid_columnconfigure(0, weight=1)
+        _act_tab.grid_rowconfigure(0, weight=1)
 
-        # ── Activity log ──────────────────────────────────────────────────────
         self._log_box = ctk.CTkTextbox(
-            self, height=120,
-            font=ctk.CTkFont(family="Courier New" if sys.platform == "win32" else "Courier", size=11),
+            _act_tab,
+            font=_mono,
             fg_color="#0d1117", text_color="#c9d1d9",
-            corner_radius=8,
+            corner_radius=6,
         )
-        self._log_box.grid(row=14, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        self._log_box.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
         self._log_box.configure(state="disabled")
+
+        # Start on Agent tab so analysis is immediately visible
+        self._bottom_tabs.set("🤖  Agent Analysis")
 
     # ── Widget helpers ────────────────────────────────────────────────────────
     def _stat_card(self, parent: ctk.CTkFrame, label: str,
@@ -1302,6 +1319,17 @@ class App(ctk.CTk):
         self._agent_box.configure(state="disabled")
         if phase:
             self._lbl_agent_phase.configure(text=phase)
+        # Auto-switch: show Agent tab during analysis, Activity once trading starts
+        if msg.startswith("🟢") or msg.startswith("🟡"):
+            try:
+                self._bottom_tabs.set("Activity")
+            except Exception:
+                pass
+        elif not phase.startswith("Trading") and not phase.startswith("Paper"):
+            try:
+                self._bottom_tabs.set("🤖  Agent Analysis")
+            except Exception:
+                pass
 
     def _set_status(self, key: str) -> None:
         color, text = self._STATUS_MAP.get(key, ("#6e7681", f"● {key.upper()}"))
