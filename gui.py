@@ -362,13 +362,20 @@ class _BotController:
                                    f"  ↳ Warm-starting from previous agent params  "
                                    f"MA={_saved['ma_len']}  BM={_saved['band_mult']:.4f}%")
 
-                    # closure to capture loop vars
+                    # closure to capture loop vars — throttled to 1 emit per
+                    # percentage point so the queue isn't flooded with thousands
+                    # of progress messages (4000 trials → ≤101 callbacks)
                     def _make_cb(pidx: int, n_pairs: int) -> Any:
+                        _last = [-1]
                         def cb(done: int, total: int) -> None:
+                            pct = done * 100 // total
+                            if pct == _last[0] and done < total:
+                                return
+                            _last[0] = pct
                             base = (pidx - 1) / n_pairs
                             frac = (done / total) / n_pairs
                             self._emit("progress", base + frac,
-                                       f"Analyzing market conditions… {done * 100 // total}%")
+                                       f"Analyzing market conditions… {pct}%")
                         return cb
 
                     opt = bot.optimise_bayesian(
@@ -578,11 +585,16 @@ class _PaperBotController:
                                        f"MA={_saved['ma_len']}  BM={_saved['band_mult']:.4f}%")
 
                         def _make_cb(pidx: int, npairs: int) -> Any:
+                            _last = [-1]
                             def cb(done: int, total: int) -> None:
+                                pct = done * 100 // total
+                                if pct == _last[0] and done < total:
+                                    return
+                                _last[0] = pct
                                 base = (pidx - 1) / npairs
                                 frac = (done / total) / npairs
                                 self._emit("progress", base + frac,
-                                           f"Analyzing market conditions… {done * 100 // total}%")
+                                           f"Analyzing market conditions… {pct}%")
                             return cb
 
                         opt = bot.optimise_bayesian(
@@ -739,6 +751,9 @@ class App(ctk.CTk):
         self._mode      = "LIVE"   # "LIVE" or "PAPER"
         self._api_open  = True
         self._risk_open = False  # Settings start collapsed
+        # Line counters — used to trim textboxes and prevent slow inserts
+        self._log_lines   = 0
+        self._agent_lines = 0
 
         # Install filtered log handler
         handler = _GUILogHandler(self._q)
@@ -1317,6 +1332,10 @@ class App(ctk.CTk):
         ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
         self._log_box.configure(state="normal")
         self._log_box.insert("end", f"[{ts}]  {msg}\n")
+        self._log_lines += 1
+        if self._log_lines > 400:          # trim: keep last 300 lines
+            self._log_box.delete("1.0", "101.0")
+            self._log_lines -= 100
         self._log_box.see("end")
         self._log_box.configure(state="disabled")
 
@@ -1324,6 +1343,10 @@ class App(ctk.CTk):
         ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
         self._agent_box.configure(state="normal")
         self._agent_box.insert("end", f"[{ts}]  {msg}\n")
+        self._agent_lines += 1
+        if self._agent_lines > 400:        # trim: keep last 300 lines
+            self._agent_box.delete("1.0", "101.0")
+            self._agent_lines -= 100
         self._agent_box.see("end")
         self._agent_box.configure(state="disabled")
         if phase:
