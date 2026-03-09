@@ -297,12 +297,12 @@ The bot enters short when price touches a premium band above the RMA centre line
 |---|------|---------|
 | 1 | Liquidation | mark price ≥ liquidation price (Bybit isolated formula) |
 | 2 | Take-Profit | price drops to entry × (1 − tp_pct) |
-| 3 | Trail Stop | high ≥ min_low_since_entry + ATR_mult × ATR (Jason McIntosh) |
+| 3 | Stop-Loss | high ≥ entry × (1 + sl_pct) — wide guard before liquidation |
 | 4 | Band Exit | low drops below a discount band (mirrors entry logic) |
 
-In **live** mode, TP and liquidation are handled server-side by Bybit; trail stop and band exits are checked on every closed candle. In **paper** mode, all four exits are simulated locally using the exact Bybit liquidation formula with the user-selected leverage. Slippage (1 tick) is applied to all simulated fills.
+In **live** mode, TP and liquidation are handled server-side by Bybit; stop-loss and band exits are checked on every closed candle. In **paper** mode, all four exits are simulated locally using the exact Bybit liquidation formula with the user-selected leverage. Slippage (1 tick) is applied to all simulated fills.
 
-The optimiser searches three parameters — MA length, band multiplier, and TP % — and re-runs every 8 hours in a background thread so live candle processing is never blocked. All (symbol, interval) pairs are ranked by `score = PnL% / (1 + max_drawdown%)` and the top-ranked pair per symbol is selected for trading.
+The optimiser searches six parameters — entry MA length, entry band mult, exit MA length, exit band mult, TP %, and SL % — and re-runs every 8 hours in a background thread so live candle processing is never blocked. All (symbol, interval) pairs are ranked by `score = PnL% / (1 + max_drawdown%)` and the top-ranked pair per symbol is selected for trading.
 
 See **`STRATEGY.md`** for the complete specification including exact formulas and all invariants.
 

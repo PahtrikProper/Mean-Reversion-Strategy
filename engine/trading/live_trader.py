@@ -756,8 +756,7 @@ class LiveRealTrader:
           2. Refresh wallet/position state from Bybit REST
           3. Skip if not enough candles for warm-up
           4. Detect externally-closed position (server TP or liquidation)
-          5. Update min_low_since_entry for trail stop tracking
-          6. Check Jason McIntosh trail stop (high >= min_low + mult×ATR)  [priority 3]
+          5. Check stop-loss (high >= entry * (1 + sl_pct))               [priority 3]
           8. Check band exit (low drops below discount_k band — mirrors entry logic) [priority 5]
           9. Check entry signal (band crossover AND ADX gate AND RSI gate)
          10. Log candle-close summary
@@ -911,7 +910,7 @@ class LiveRealTrader:
                                 symbol=self.symbol, interval=self.interval,
                                 blocked_by=_sh["blocked_by"],
                                 entry_price=_sh["entry_price"], tp_price=_sh["tp_price"],
-                                trail_stop_at_resolution=_sh["sl_price"],
+                                sl_price_at_resolution=_sh["sl_price"],
                                 band=_sh["band"],
                                 adx_at_entry=_sh.get("adx_at_entry"),
                                 rsi_at_entry=_sh.get("rsi_at_entry"),
@@ -974,7 +973,7 @@ class LiveRealTrader:
                 signal_type=_sig_type,
                 raw_band_level=_raw_short, final_band_level=_final_short,
                 adx=adx_val, rsi=rsi_val, atr=atr_val if atr_val else None,
-                trail_stop_level=_sl_price_lvl,
+                sl_price_level=_sl_price_lvl,
                 blocked_by=_blocked,
                 o=o, h=h, l=l, c=c,
                 ma_len=self.entry_params.ma_len,
@@ -997,7 +996,7 @@ class LiveRealTrader:
                     liquidation_price=self.position.liq_price,
                     unrealized_pnl=_upnl,
                     min_low_since_entry=None,
-                    trail_stop_price=_sl_price_lvl,
+                    sl_price=_sl_price_lvl,
                     tp_price=_tp_snap,
                     wallet=self.wallet,
                 )
@@ -1007,7 +1006,7 @@ class LiveRealTrader:
                     qty=None, entry_price=None, entry_time=None,
                     mark_price=self.mark_price,
                     liquidation_price=None, unrealized_pnl=None,
-                    min_low_since_entry=None, trail_stop_price=None,
+                    min_low_since_entry=None, sl_price=None,
                     tp_price=None, wallet=self.wallet,
                 )
 

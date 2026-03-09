@@ -1690,7 +1690,7 @@ class App(ctk.CTk):
             f"Band Mult: {d['band_mult']:.2f}%"
         )
         xp_str = (
-            f"Exit   ·  TP: {d['tp_pct']:.2f}%  ·  Trail Stop (Jason McIntosh ATR)"
+            f"Exit   ·  TP: {d['tp_pct']:.2f}%  ·  SL: {d.get('sl_pct', 5.0):.2f}%  ·  Band Exit"
         )
         sign  = "+" if d["return_pct"] >= 0 else ""
         rc    = "#3fb950" if d["return_pct"] >= 0 else "#f85149"

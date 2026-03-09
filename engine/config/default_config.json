@@ -13,7 +13,7 @@
     "band_mult": 2.5
   },
   "exit": {
-    "_comment": "Exit: TP, trail stop (Jason McIntosh ATR), time (holding_days), or band exit",
+    "_comment": "Exit: TP, stop-loss (hard SL, optimised), or band exit",
     "holding_days": 30,
     "tp_pct": 0.0028
   },

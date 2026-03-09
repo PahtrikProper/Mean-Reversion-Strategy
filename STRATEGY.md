@@ -16,7 +16,7 @@ This file defines the exact trading strategy implemented in this codebase.
 
 ## Strategy Overview
 
-A mean-reversion SHORT strategy. It fades price extensions above a moving-average baseline using EMA-smoothed premium bands. The bot enters short when price touches a premium band and then drops back below it (band crossover), confirming the overextension is reversing. It exits when price reaches a discount band on the other side, or via TP / trail stop (Jason McIntosh ATR).
+A mean-reversion SHORT strategy. It fades price extensions above a moving-average baseline using EMA-smoothed premium bands. The bot enters short when price touches a premium band and then drops back below it (band crossover), confirming the overextension is reversing. It exits when price reaches a discount band on the other side, or via TP / stop-loss.
 
 ---
 
@@ -43,7 +43,6 @@ discount_k = EMA(main * (1 - band_mult * 0.01 * k), 5)    for k = 1..8
 ```
 ADX  = ADX(14)   — Wilder's method
 RSI  = RSI(14)   — Wilder's method (avg_gain / avg_loss via RMA)
-ATR  = ATR(trail_atr_period)  — Wilder's method, used for trail stop only
 ```
 
 ---
@@ -89,18 +88,10 @@ resolve_entry_signals(raw_short, adx, rsi) -> int
 |----------|-----------|---------|-------|
 | 1 | **Liquidation** | mark_high >= liq_price | Bybit isolated SHORT formula; checked in backtest, detected via position=None in live |
 | 2 | **Take-Profit** | low <= entry * (1 - tp_pct) | Server-side TP in live (Bybit LastPrice trigger); direct check in backtest. After `TIME_TP_HOURS` (20 h) the tighter **data-driven TP** is substituted — reason logged as `TIME_TP` vs `TP` |
-| 3 | **Trail Stop** | high >= min_low_since_entry + trail_atr_mult × ATR | Jason McIntosh ATR trail — SHORT version |
+| 3 | **Stop-Loss** | high >= entry * (1 + sl_pct) | Hard stop — wide (default 5%), optimised alongside TP; pre-liquidation guard |
 | 4 | **Band Exit** | discount band crossover-above-low | Mirror of entry signal, on discount bands + low |
 
 **This priority order is fixed.** It is implemented identically in both the backtester (`backtester.py`) and live trader (`live_trader.py`).
-
-### Trail Stop Detail (Jason McIntosh ATR — SHORT)
-```
-trail_stop = min_low_since_entry + trail_atr_mult × ATR(trail_atr_period)
-
-Exit when: current_high >= trail_stop
-```
-`min_low_since_entry` tracks the **lowest low** seen since entry. As price falls (trade going in our favour), `min_low_since_entry` decreases, pulling `trail_stop` down with it — locking in more profit.
 
 ### Band Exit Detail
 ```
@@ -126,7 +117,10 @@ compute_exit_signals_raw(current_row, prev_row, current_low, current_high) -> in
 |-----------|-----------|---------|--------------|
 | `ma_len` | `EntryParams` | 100 | 2 – 300 (int) |
 | `band_mult` | `EntryParams` | 2.5 | 0.3 – 10.0 % (stored ×10 as int during search) |
+| `exit_ma_len` | `ExitParams` | 100 | 2 – 300 (int) |
+| `exit_band_mult` | `ExitParams` | 2.5 | 0.3 – 10.0 % (stored ×10 as int during search) |
 | `tp_pct` | `ExitParams` | 0.0028 | 18 – 1100 bp × 0.0001 (0.18% – 11.00%) |
+| `sl_pct` | `ExitParams` | 0.05 | 50 – 900 bp × 0.0001 (0.50% – 9.00%) |
 
 ### Fixed Constants (never optimised)
 
@@ -137,8 +131,6 @@ compute_exit_signals_raw(current_row, prev_row, current_low, current_high) -> in
 | `ADX_PERIOD` | 14 | `indicators.py` |
 | `RSI_PERIOD` | 14 | `indicators.py` |
 | `BAND_EMA_LENGTH` | 5 | `indicators.py` |
-| `TRAIL_ATR_PERIOD` | 14 | `constants.py` |
-| `TRAIL_ATR_MULT` | 3.0 | `constants.py` |
 | `LIVE_TP_SCALE` | 0.75 | `constants.py` |
 | `SIGNAL_DROUGHT_HOURS` | 4.0 | `constants.py` |
 | `MAX_LOSS_PCT` | None | `constants.py` (set via `--max-loss` CLI flag) |
@@ -190,7 +182,7 @@ The optimiser runs trials in parallel using `ThreadPoolExecutor` (up to `min(cpu
 ## Live Trading Architecture
 
 ### Data Sources
-- **Last-price klines** (`/v5/market/kline`): used for all signal generation, TP, trail stop, and band exit
+- **Last-price klines** (`/v5/market/kline`): used for all signal generation, TP, stop-loss, and band exit
 - **Mark-price klines** (`/v5/market/mark-price-kline`): used only for liquidation price checks
 - **Bybit WebSocket** (`wss://stream.bybit.com/v5/public/linear`): live candle stream (`kline.<interval>.<symbol>`) and mark price stream (`tickers.<symbol>`)
 
@@ -247,7 +239,7 @@ Paper trading uses `PaperTrader` (`paper_trader.py`) instead of `LiveRealTrader`
 
 - No API keys required — uses public REST and WebSocket only
 - Virtual wallet starts at `PAPER_STARTING_BALANCE` (default **$500 USDT**)
-- All four exit types are simulated locally (liquidation, TP, trail stop, band)
+- All four exit types are simulated locally (liquidation, TP, stop-loss, band)
 - Slippage (`SLIPPAGE_TICKS = 1`) applied to all fills via `apply_slippage()` in `orders.py`
 - Taker and maker fees both simulated using per-symbol fee lookups from `helpers.py`
 
@@ -256,8 +248,8 @@ Paper trading uses `PaperTrader` (`paper_trader.py`) instead of `LiveRealTrader`
 ## Key Invariants — Do Not Change Without Explicit Instruction
 
 1. **SHORT only.** No long entries. No flip logic.
-2. **Exit priority is fixed**: Liquidation → TP → Trail Stop → Band. This must be identical in `backtester.py` and `live_trader.py`.
-3. **No hard stop-loss.** The trail stop is the only stop mechanism.
+2. **Exit priority is fixed**: Liquidation → TP → Stop-Loss → Band. This must be identical in `backtester.py` and `live_trader.py`.
+3. **Hard stop-loss only.** `sl_pct` is optimised alongside `tp_pct`. No trail stop.
 4. **Band EMA length is always 5.** This is not a parameter.
 5. **ADX threshold is always 25, RSI threshold is always 40.** These are not optimised.
 6. **The optimiser sorts internally by (n_losses ASC, return_pct DESC).** Pair selection uses `pnl_pct / (1 + max_drawdown_pct)`. Do not conflate these two scoring steps.

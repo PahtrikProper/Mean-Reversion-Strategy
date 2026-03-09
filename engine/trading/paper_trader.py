@@ -773,7 +773,7 @@ class PaperTrader:
                             symbol=self.symbol, interval=self.interval,
                             blocked_by=_sh["blocked_by"],
                             entry_price=_sh["entry_price"], tp_price=_sh["tp_price"],
-                            trail_stop_at_resolution=_sh["sl_price"],
+                            sl_price_at_resolution=_sh["sl_price"],
                             band=_sh["band"],
                             adx_at_entry=_sh.get("adx_at_entry"),
                             rsi_at_entry=_sh.get("rsi_at_entry"),
@@ -837,7 +837,7 @@ class PaperTrader:
             signal_type=_sig_type,
             raw_band_level=_raw_short, final_band_level=_final_short,
             adx=adx_val, rsi=rsi_val, atr=atr_val if atr_val else None,
-            trail_stop_level=_sl_price_lvl,
+            sl_price_level=_sl_price_lvl,
             blocked_by=_blocked,
             o=o, h=h, l=l, c=c,
             ma_len=self.entry_params.ma_len,
@@ -860,7 +860,7 @@ class PaperTrader:
                 liquidation_price=self._paper_liq_price,
                 unrealized_pnl=_upnl,
                 min_low_since_entry=None,
-                trail_stop_price=_sl_price_lvl,
+                sl_price=_sl_price_lvl,
                 tp_price=_tp_snap,
                 wallet=self.wallet,
             )
@@ -870,7 +870,7 @@ class PaperTrader:
                 qty=None, entry_price=None, entry_time=None,
                 mark_price=self.mark_price,
                 liquidation_price=None, unrealized_pnl=None,
-                min_low_since_entry=None, trail_stop_price=None,
+                min_low_since_entry=None, sl_price=None,
                 tp_price=None, wallet=self.wallet,
             )
 

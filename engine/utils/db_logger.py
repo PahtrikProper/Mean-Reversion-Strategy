@@ -156,14 +156,14 @@ def _create_tables() -> None:
         ts_utc           TEXT    NOT NULL,
         symbol           TEXT    NOT NULL,
         interval         TEXT    NOT NULL,
-        signal_type      TEXT,   -- 'ENTRY','EXIT_BAND','EXIT_TRAIL','EXIT_TP',
+        signal_type      TEXT,   -- 'ENTRY','EXIT_BAND','EXIT_SL','EXIT_TP',
                                  -- 'EXIT_LIQ','NONE'
         raw_band_level   INTEGER,  -- 0-8; raw crossover before gates
         final_band_level INTEGER,  -- 0-8; after gate filtering
         adx              REAL,
         rsi              REAL,
         atr              REAL,
-        trail_stop_level REAL,   -- computed trail stop price (NULL if flat)
+        sl_price_level   REAL,   -- computed stop-loss price (NULL if flat)
         blocked_by       TEXT,   -- 'ADX','RSI','GATE','POSITION', NULL if fired
         open             REAL,
         high             REAL,
@@ -182,7 +182,7 @@ def _create_tables() -> None:
         symbol        TEXT    NOT NULL,
         interval      TEXT,
         action        TEXT,   -- 'ENTRY' or 'EXIT'
-        reason        TEXT,   -- 'BAND_ENTRY','TP','TRAIL_STOP','BAND_EXIT',
+        reason        TEXT,   -- 'BAND_ENTRY','TP','STOP_LOSS','BAND_EXIT',
                               -- 'LIQUIDATED','EXTERNAL_CLOSE'
         side          TEXT,
         qty           REAL,
@@ -234,7 +234,7 @@ def _create_tables() -> None:
         liquidation_price   REAL,
         unrealized_pnl      REAL,
         min_low_since_entry REAL,
-        trail_stop_price    REAL,
+        sl_price            REAL,
         tp_price            REAL,
         wallet              REAL
     );
@@ -359,11 +359,11 @@ def _create_tables() -> None:
         blocked_by               TEXT,   -- 'ADX','RSI','POSITION','WALLET'
         entry_price              REAL,
         tp_price                 REAL,
-        trail_stop_at_resolution REAL,
+        sl_price_at_resolution   REAL,
         band                     INTEGER,
         adx_at_entry             REAL,
         rsi_at_entry             REAL,
-        outcome                  TEXT,   -- 'TP_HIT','TRAIL_STOPPED'
+        outcome                  TEXT,   -- 'TP_HIT','SL_HIT'
         outcome_pnl_pct          REAL,   -- leveraged PnL% that would have been achieved
         candles_elapsed          INTEGER
     );
@@ -571,7 +571,7 @@ def log_signal(
     adx: Optional[float],
     rsi: Optional[float],
     atr: Optional[float],
-    trail_stop_level: Optional[float],
+    sl_price_level: Optional[float],
     blocked_by: Optional[str],
     o: float, h: float, l: float, c: float,
     ma_len: int,
@@ -582,14 +582,14 @@ def log_signal(
         """INSERT INTO signals (
             ts_utc, symbol, interval, signal_type,
             raw_band_level, final_band_level,
-            adx, rsi, atr, trail_stop_level, blocked_by,
+            adx, rsi, atr, sl_price_level, blocked_by,
             open, high, low, close,
             ma_len, band_mult, tp_pct
         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             ts_utc, symbol, interval, signal_type,
             raw_band_level, final_band_level,
-            _safe(adx), _safe(rsi), _safe(atr), _safe(trail_stop_level), blocked_by,
+            _safe(adx), _safe(rsi), _safe(atr), _safe(sl_price_level), blocked_by,
             _safe(o), _safe(h), _safe(l), _safe(c),
             ma_len, band_mult, tp_pct,
         ),
@@ -682,7 +682,7 @@ def log_position(
     liquidation_price: Optional[float],
     unrealized_pnl: Optional[float],
     min_low_since_entry: Optional[float],
-    trail_stop_price: Optional[float],
+    sl_price: Optional[float],
     tp_price: Optional[float],
     wallet: float,
 ) -> None:
@@ -690,7 +690,7 @@ def log_position(
         """INSERT INTO positions (
             ts_utc, symbol,
             qty, entry_price, entry_time, mark_price, liquidation_price,
-            unrealized_pnl, min_low_since_entry, trail_stop_price, tp_price,
+            unrealized_pnl, min_low_since_entry, sl_price, tp_price,
             wallet
         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
@@ -698,7 +698,7 @@ def log_position(
             _safe(qty), _safe(entry_price), entry_time,
             _safe(mark_price), _safe(liquidation_price),
             _safe(unrealized_pnl), _safe(min_low_since_entry),
-            _safe(trail_stop_price), _safe(tp_price),
+            _safe(sl_price), _safe(tp_price),
             _safe(wallet),
         ),
     )
@@ -896,7 +896,7 @@ def log_missed_trade(
     blocked_by: str,
     entry_price: float,
     tp_price: float,
-    trail_stop_at_resolution: Optional[float],
+    sl_price_at_resolution: Optional[float],
     band: int,
     adx_at_entry: Optional[float],
     rsi_at_entry: Optional[float],
@@ -906,19 +906,19 @@ def log_missed_trade(
 ) -> None:
     """Log a signal that was blocked by a gate but would have resolved profitably or as a loss.
 
-    outcome is 'TP_HIT' (profitable) or 'TRAIL_STOPPED' (stopped out).
+    outcome is 'TP_HIT' (profitable) or 'SL_HIT' (stopped out).
     outcome_pnl_pct is the leveraged percentage P&L that would have been achieved.
     """
     _execute(
         """INSERT INTO missed_trades (
             entry_ts, resolved_ts, symbol, interval, blocked_by,
-            entry_price, tp_price, trail_stop_at_resolution,
+            entry_price, tp_price, sl_price_at_resolution,
             band, adx_at_entry, rsi_at_entry,
             outcome, outcome_pnl_pct, candles_elapsed
         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             entry_ts, resolved_ts, symbol, interval, blocked_by,
-            _safe(entry_price), _safe(tp_price), _safe(trail_stop_at_resolution),
+            _safe(entry_price), _safe(tp_price), _safe(sl_price_at_resolution),
             band, _safe(adx_at_entry), _safe(rsi_at_entry),
             outcome, _safe(outcome_pnl_pct), candles_elapsed,
         ),

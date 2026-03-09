@@ -14,7 +14,7 @@ Exit priority per candle:
   3. Stop-Loss    (last high >= entry * (1 + sl_pct))           [wide, pre-liquidation guard]
   4. Band exit    (last low drops below discount_k band)        [mirrors entry logic]
 
-No hard stop-loss. Trail stop trails DOWN as price falls (locking in profit for SHORT).
+Stop-loss fires when last high >= entry * (1 + sl_pct) — wide guard before liquidation.
 """
 
 import pandas as pd
