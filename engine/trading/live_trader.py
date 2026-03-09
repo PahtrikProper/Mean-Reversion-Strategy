@@ -40,6 +40,7 @@ from ..utils.constants import (
     SIGNAL_DROUGHT_HOURS,
     MAX_LOSS_PCT,
     CANDLE_INTERVALS,
+    PAPER_SYMBOLS,
 )
 from ..utils import constants as _C
 from ..utils.data_structures import RealPosition, PendingSignal, EntryParams, ExitParams, MC_MIN_TRADES, MC_SIMS
@@ -56,7 +57,7 @@ from ..core.indicators import (
     ADX_THRESHOLD,
     RSI_NEUTRAL_LO,
 )
-from ..trading.bybit_client import BybitPrivateClient, fetch_last_klines, fetch_mark_klines
+from ..trading.bybit_client import BybitPrivateClient, fetch_last_klines, fetch_mark_klines, fetch_risk_tiers, get_instrument_info
 from ..trading.liquidation import pick_risk_tier
 from ..backtest.backtester import run_monte_carlo, mc_score
 from ..utils.plotting import print_monte_carlo_report
@@ -661,72 +662,89 @@ class LiveRealTrader:
         ).start()
 
     def _run_reoptimise(self):
-        """Background thread: re-run param search across all configured intervals for this symbol.
+        """Background thread: scan ALL PAPER_SYMBOLS × CANDLE_INTERVALS and switch
+        to whichever (symbol, interval) pair scores best.
 
-        Symbol never changes in live mode (can't remotely close real Bybit positions);
-        only interval and params can switch.
+        Symbol switching is allowed only when flat (no open position) so we never
+        abandon a live trade mid-flight.  Interval-only switches can always happen.
         """
-        log.info(f"[REOPT] {self.symbol}: starting multi-interval optimisation...")
+        log.info(f"[REOPT] starting multi-symbol optimisation scan ({PAPER_SYMBOLS})...")
         try:
             best_score   = float("-inf")
+            best_sym     = self.symbol
             best_iv      = self.interval
             best_entry   = None
             best_exit_p  = None
             best_br      = None
             best_df_last = None
+            best_risk_df = None
+            best_inst    = None
 
-            for iv in supported_intervals(CANDLE_INTERVALS):
+            for sym in PAPER_SYMBOLS:
+                # Fetch risk tiers + instrument info for every candidate symbol
                 try:
-                    df_last, df_mark = download_seed_history(self.symbol, DAYS_BACK_SEED, iv)
-
-                    saved_best = None
-                    if iv == self.interval:
-                        saved_best = {
-                            "ma_len":         self.entry_params.ma_len,
-                            "band_mult":      self.entry_params.band_mult,
-                            "tp_pct":         self.exit_params.tp_pct,
-                            "sl_pct":         self.exit_params.sl_pct,
-                            "exit_ma_len":    self.exit_params.exit_ma_len,
-                            "exit_band_mult": self.exit_params.exit_band_mult,
-                        }
-
-                    opt = optimise_params(
-                        df_last=df_last, df_mark=df_mark,
-                        risk_df=self.risk_df,
-                        trials=INIT_TRIALS,
-                        lookback_candles=min(len(df_last), len(df_mark)),
-                        event_name=f"REOPT_{self.symbol}_{iv}m",
-                        leverage=leverage_for(self.symbol),
-                        fee_rate=taker_fee_for(self.symbol),
-                        maker_fee_rate=maker_fee_for(self.symbol),
-                        interval_minutes=interval_minutes(iv),
-                        saved_best=saved_best,
-                        db_symbol=self.symbol, db_interval=iv, db_trigger="REOPT",
-                    )
-
-                    br = opt["best_result"]
-                    pf = br.pnl_pct / (1.0 + max(br.max_drawdown_pct, 0.001))
-                    log.info(
-                        f"[REOPT] {self.symbol} {iv}m  score={pf:.4f}  "
-                        f"PnL={br.pnl_pct:.2f}%  DD={br.max_drawdown_pct:.1f}%"
-                    )
-
-                    if pf > best_score:
-                        best_score   = pf
-                        best_iv      = iv
-                        best_entry   = opt["entry_params"]
-                        best_exit_p  = opt["exit_params"]
-                        best_br      = br
-                        best_df_last = df_last
-
+                    risk_df = fetch_risk_tiers(sym)
+                    inst    = get_instrument_info(sym)
                 except Exception as e:
-                    log.warning(f"[REOPT] {self.symbol} {iv}m: skipped: {e}")
+                    log.warning(f"[REOPT] {sym}: fetch_risk_tiers/instrument failed — skipping: {e}")
+                    continue
+
+                for iv in supported_intervals(CANDLE_INTERVALS):
+                    try:
+                        df_last, df_mark = download_seed_history(sym, DAYS_BACK_SEED, iv)
+
+                        # Warm-start when re-testing the current live pair
+                        saved_best = None
+                        if sym == self.symbol and iv == self.interval:
+                            saved_best = {
+                                "ma_len":         self.entry_params.ma_len,
+                                "band_mult":      self.entry_params.band_mult,
+                                "tp_pct":         self.exit_params.tp_pct,
+                                "sl_pct":         self.exit_params.sl_pct,
+                                "exit_ma_len":    self.exit_params.exit_ma_len,
+                                "exit_band_mult": self.exit_params.exit_band_mult,
+                            }
+
+                        opt = optimise_params(
+                            df_last=df_last, df_mark=df_mark,
+                            risk_df=risk_df,
+                            trials=INIT_TRIALS,
+                            lookback_candles=min(len(df_last), len(df_mark)),
+                            event_name=f"REOPT_{sym}_{iv}m",
+                            leverage=leverage_for(sym),
+                            fee_rate=taker_fee_for(sym),
+                            maker_fee_rate=maker_fee_for(sym),
+                            interval_minutes=interval_minutes(iv),
+                            saved_best=saved_best,
+                            db_symbol=sym, db_interval=iv, db_trigger="REOPT",
+                        )
+
+                        br = opt["best_result"]
+                        pf = br.pnl_pct / (1.0 + max(br.max_drawdown_pct, 0.001))
+                        log.info(
+                            f"[REOPT] {sym} {iv}m  score={pf:.4f}  "
+                            f"PnL={br.pnl_pct:.2f}%  DD={br.max_drawdown_pct:.1f}%"
+                        )
+
+                        if pf > best_score:
+                            best_score   = pf
+                            best_sym     = sym
+                            best_iv      = iv
+                            best_entry   = opt["entry_params"]
+                            best_exit_p  = opt["exit_params"]
+                            best_br      = br
+                            best_df_last = df_last
+                            best_risk_df = risk_df
+                            best_inst    = inst
+
+                    except Exception as e:
+                        log.warning(f"[REOPT] {sym} {iv}m: skipped: {e}")
 
             if best_entry is None:
-                log.warning(f"[REOPT] {self.symbol}: no valid intervals found — keeping old params")
+                log.warning("[REOPT] no valid combos found — keeping current params")
                 return
 
-            # ── Monte Carlo on the best-interval result ────────────────────────
+            # ── Monte Carlo on the global winner ──────────────────────────────
             records      = getattr(best_br, "trade_records", []) or []
             new_mc_score = float("-inf")
             mc_res       = None
@@ -736,12 +754,12 @@ class LiveRealTrader:
                     new_mc_score = mc_score(mc_res)
                     print_monte_carlo_report(
                         mc_res, float(STARTING_WALLET),
-                        len(records), self.symbol, best_iv,
+                        len(records), best_sym, best_iv,
                     )
 
             log.info(
-                f"[REOPT] {self.symbol}: winner interval={best_iv}m  MC={new_mc_score:.4f}  "
-                f"(current={self.interval}m)"
+                f"[REOPT] winner: {best_sym} {best_iv}m  MC={new_mc_score:.4f}  "
+                f"(current: {self.symbol} {self.interval}m)"
             )
 
             _ts_reopt = pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d %H:%M:%S")
@@ -749,7 +767,7 @@ class LiveRealTrader:
             # DB: MC run
             if mc_res:
                 _db.log_monte_carlo(
-                    ts_utc=_ts_reopt, symbol=self.symbol, interval=best_iv,
+                    ts_utc=_ts_reopt, symbol=best_sym, interval=best_iv,
                     mc_results=mc_res,
                     score=new_mc_score if new_mc_score != float("-inf") else None,
                 )
@@ -757,7 +775,7 @@ class LiveRealTrader:
             # DB: params event
             _event = "REOPT_ACCEPTED" if new_mc_score > 0 else "REOPT_REJECTED"
             _db.log_params(
-                ts_utc=_ts_reopt, symbol=self.symbol, interval=best_iv,
+                ts_utc=_ts_reopt, symbol=best_sym, interval=best_iv,
                 event=_event,
                 ma_len=best_entry.ma_len, band_mult=best_entry.band_mult,
                 tp_pct=best_exit_p.tp_pct,
@@ -769,14 +787,41 @@ class LiveRealTrader:
             )
 
             if new_mc_score > 0:
-                _switched_iv = best_iv != self.interval
-                if _switched_iv:
+                _switched_sym = best_sym != self.symbol
+                _switched_iv  = best_iv  != self.interval
+
+                # Symbol switch requires being flat — can't abandon a live position
+                if _switched_sym and self.position is not None:
                     log.info(
-                        f"[REOPT] {self.symbol}: ★ switching interval "
-                        f"{self.interval}m → {best_iv}m  (score {best_score:.4f})"
+                        f"[REOPT] ★ best symbol is {best_sym} but position open on "
+                        f"{self.symbol} — symbol switch deferred until flat"
                     )
-                    self.interval = best_iv
-                    self.df = best_df_last[
+                    _switched_sym = False
+                    best_sym = self.symbol
+
+                if _switched_sym or _switched_iv:
+                    log.info(
+                        f"[REOPT] ★ switching {self.symbol} {self.interval}m "
+                        f"→ {best_sym} {best_iv}m  (score {best_score:.4f})"
+                    )
+
+                if _switched_sym:
+                    self.symbol      = best_sym
+                    self.risk_df     = best_risk_df
+                    self.instrument  = best_inst
+                    self.leverage    = leverage_for(best_sym)
+                    self.taker_fee   = taker_fee_for(best_sym)
+                    self.maker_fee   = maker_fee_for(best_sym)
+                    # Update the traders dict so WS routing follows the new symbol
+                    if self._traders_ref is not None:
+                        old_keys = [k for k, v in self._traders_ref.items() if v is self]
+                        for k in old_keys:
+                            del self._traders_ref[k]
+                        self._traders_ref[best_sym] = self
+
+                if _switched_sym or _switched_iv:
+                    self.interval            = best_iv
+                    self.df                  = best_df_last[
                         ["ts", "open", "high", "low", "close", "volume"]
                     ].copy().reset_index(drop=True)
                     self.closed_candle_count = 0
@@ -786,16 +831,16 @@ class LiveRealTrader:
                 self.exit_params  = best_exit_p
                 self._recompute_indicators()
                 log.info(
-                    f"[REOPT] {self.symbol}: params updated  interval={best_iv}m  "
+                    f"[REOPT] params updated  {self.symbol} {self.interval}m  "
                     f"MC={new_mc_score:.4f}"
                 )
             else:
                 log.info(
-                    f"[REOPT] {self.symbol}: MC score {new_mc_score:.4f} <= 0 — keeping old params"
+                    f"[REOPT] MC score {new_mc_score:.4f} <= 0 — keeping current params"
                 )
 
         except Exception as e:
-            log.error(f"[REOPT] {self.symbol}: failed: {e}", exc_info=True)
+            log.error(f"[REOPT] failed: {e}", exc_info=True)
         finally:
             self.last_reopt_time = time.time()
             self._reopt_running  = False

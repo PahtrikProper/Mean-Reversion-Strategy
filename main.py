@@ -144,22 +144,23 @@ class Config:
 def run_live_trading():
     """
     Full automated flow:
-      1. For each (symbol, interval) pair: download seed history + optimise
-      2. Rank all pairs by score (win_rate × profit_factor / (1 + max_drawdown))
-      3. Launch LiveRealTrader for the top-ranked pair per symbol
+      1. For each (symbol, interval) pair across ALL PAPER_SYMBOLS: download seed + optimise
+      2. Rank all pairs by score = PnL% / (1 + DD%)
+      3. Launch LiveRealTrader for the top-ranked pair (best symbol + interval)
       4. Start WebSocket live trading
     """
+    scan_symbols = const_module.PAPER_SYMBOLS   # scan all candidates to pick the best one
     print("=" * 65)
-    print(f"  Mean Reversion Trader  |  Mean Reversion Strategy  |  {', '.join(const_module.SYMBOLS)}")
+    print(f"  Mean Reversion Trader  |  Mean Reversion Strategy  |  scanning {', '.join(scan_symbols)}")
     print("=" * 65)
 
     import pandas as _pd
     _startup_ts = _pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d %H:%M:%S")
     _db.log_event(ts_utc=_startup_ts, level="INFO", event_type="STARTUP",
                   message="Live trading session started",
-                  detail={"symbols": const_module.SYMBOLS, "mode": "live"})
+                  detail={"scan_symbols": scan_symbols, "mode": "live"})
 
-    symbols   = const_module.SYMBOLS
+    symbols   = scan_symbols
     intervals = supported_intervals(const_module.CANDLE_INTERVALS)
     n_top     = const_module.MAX_ACTIVE_SYMBOLS
 
