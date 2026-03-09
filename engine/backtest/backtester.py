@@ -86,7 +86,7 @@ def backtest_once(
     if maker_fee_rate is None:
         maker_fee_rate = fee_rate
 
-    min_len = entry_params.ma_len + 20
+    min_len = max(entry_params.ma_len, exit_params.exit_ma_len) + 20
 
     if len(df_last_raw) < min_len + 20:
         return None
@@ -109,6 +109,8 @@ def backtest_once(
         dfl,
         ma_len=entry_params.ma_len,
         band_mult=entry_params.band_mult,
+        exit_ma_len=exit_params.exit_ma_len,
+        exit_band_mult=exit_params.exit_band_mult,
     )
 
     # ── Backtest loop ─────────────────────────────────────────────────────────

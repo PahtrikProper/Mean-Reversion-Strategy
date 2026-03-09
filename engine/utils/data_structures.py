@@ -8,6 +8,8 @@ from .constants import (
     STARTING_WALLET,
     DEFAULT_MA_LEN,
     DEFAULT_BAND_MULT,
+    DEFAULT_EXIT_MA_LEN,
+    DEFAULT_EXIT_BAND_MULT,
     DEFAULT_TP_PCT,
     STOP_LOSS_PCT,
 )
@@ -96,14 +98,21 @@ class ExitParams:
         1. Liquidation  mark_high >= liq_price                        [not a param — handled externally]
         2. TP:          low  <= entry * (1 - tp_pct)                  [optimised]
         3. Stop-Loss:   high >= entry * (1 + sl_pct)                  [optimised — wide, pre-liquidation guard]
-        4. Band:        low drops below discount_k band                [mirrors entry logic]
+        4. Band:        low drops below discount_k band                [independent exit-band params]
 
     SL is intentionally wide (default 5%) — intended to prevent full account
     liquidation, not to be routinely triggered.  Optimised alongside TP so
     the backtest finds the widest SL that still protects the account.
+
+    exit_ma_len / exit_band_mult control the discount bands used for the band
+    exit signal.  These are optimised independently from the entry (premium)
+    band params (EntryParams.ma_len / band_mult), allowing the system to find
+    different sensitivity for exiting vs entering.
     """
-    tp_pct: float = DEFAULT_TP_PCT  # take-profit fraction (e.g. 0.0028 = 0.28%)
-    sl_pct: float = STOP_LOSS_PCT   # stop-loss fraction above entry (e.g. 0.05 = 5.0%)
+    tp_pct:         float = DEFAULT_TP_PCT       # take-profit fraction (e.g. 0.0028 = 0.28%)
+    sl_pct:         float = STOP_LOSS_PCT        # stop-loss fraction above entry (e.g. 0.05 = 5.0%)
+    exit_ma_len:    int   = DEFAULT_EXIT_MA_LEN    # RMA period for discount (exit) band centre line
+    exit_band_mult: float = DEFAULT_EXIT_BAND_MULT # exit band width multiplier (%)
 
 
 # Legacy alias

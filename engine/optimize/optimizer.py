@@ -39,10 +39,14 @@ from ..utils.constants import (
     STARTING_WALLET,
     DEFAULT_TP_PCT,
     STOP_LOSS_PCT,
-    OPT_MA_LEN_MIN,        OPT_MA_LEN_MAX,
-    OPT_BAND_MULT_X10_MIN, OPT_BAND_MULT_X10_MAX,
-    OPT_TP_MIN_BP,         OPT_TP_MAX_BP,
-    OPT_SL_MIN_BP,         OPT_SL_MAX_BP,
+    DEFAULT_EXIT_MA_LEN,
+    DEFAULT_EXIT_BAND_MULT,
+    OPT_MA_LEN_MIN,             OPT_MA_LEN_MAX,
+    OPT_BAND_MULT_X10_MIN,      OPT_BAND_MULT_X10_MAX,
+    OPT_EXIT_MA_LEN_MIN,        OPT_EXIT_MA_LEN_MAX,
+    OPT_EXIT_BAND_MULT_X10_MIN, OPT_EXIT_BAND_MULT_X10_MAX,
+    OPT_TP_MIN_BP,              OPT_TP_MAX_BP,
+    OPT_SL_MIN_BP,              OPT_SL_MAX_BP,
     OPT_N_RANDOM,
     OPT_MIN_TRADES,
     RANDOM_SEED,
@@ -51,6 +55,8 @@ from ..utils.constants import (
     EXPLOIT_BAND_MULT_RADIUS_X10,
     EXPLOIT_TP_RADIUS_BP,
     EXPLOIT_SL_RADIUS_BP,
+    EXPLOIT_EXIT_MA_LEN_RADIUS,
+    EXPLOIT_EXIT_BAND_MULT_RADIUS_X10,
     TIME_TP_HOURS,
     TIME_TP_FALLBACK_PCT,
     TIME_TP_SCALE,
@@ -82,12 +88,13 @@ def optimise_params(
     db_interval: Optional[str] = None,
     db_trigger: str = "STARTUP",
 ) -> Dict[str, Any]:
-    """Random search over (ma_len, band_mult, tp_pct, sl_pct).
+    """Random search over (ma_len, band_mult, tp_pct, sl_pct, exit_ma_len, exit_band_mult).
 
-    band_mult is searched as integer × 10 for efficiency, converted to float for params.
+    band_mult / exit_band_mult are searched as integer × 10 for efficiency.
     ADX_THRESHOLD=25 and RSI_NEUTRAL_LO=40 are fixed constants (not optimised).
     tp_pct is optimised in range OPT_TP_MIN_BP–OPT_TP_MAX_BP (0.18–11.00% price move).
     sl_pct is optimised in range OPT_SL_MIN_BP–OPT_SL_MAX_BP (0.50–9.00% above entry).
+    exit_ma_len / exit_band_mult control the discount band geometry independently.
 
     Returns dict:
         {
@@ -118,34 +125,48 @@ def optimise_params(
 
     # Exploitation: sample near saved best
     if saved_best and n_exploit > 0:
-        b_ma    = int(saved_best.get("ma_len", 100))
+        b_ma     = int(saved_best.get("ma_len", 100))
         b_bm_x10 = int(np.clip(
             round(float(saved_best.get("band_mult", 2.5)) * 10),
             OPT_BAND_MULT_X10_MIN, OPT_BAND_MULT_X10_MAX))
-        b_tp_bp = int(np.clip(
+        b_tp_bp  = int(np.clip(
             round(float(saved_best.get("tp_pct", DEFAULT_TP_PCT)) * 10000),
             OPT_TP_MIN_BP, OPT_TP_MAX_BP))
-        b_sl_bp = int(np.clip(
+        b_sl_bp  = int(np.clip(
             round(float(saved_best.get("sl_pct", STOP_LOSS_PCT)) * 10000),
             OPT_SL_MIN_BP, OPT_SL_MAX_BP))
+        b_exit_ma    = int(np.clip(
+            saved_best.get("exit_ma_len", DEFAULT_EXIT_MA_LEN),
+            OPT_EXIT_MA_LEN_MIN, OPT_EXIT_MA_LEN_MAX))
+        b_exit_bm_x10 = int(np.clip(
+            round(float(saved_best.get("exit_band_mult", DEFAULT_EXIT_BAND_MULT)) * 10),
+            OPT_EXIT_BAND_MULT_X10_MIN, OPT_EXIT_BAND_MULT_X10_MAX))
 
         attempts = 0
         while len(combos) < n_exploit and attempts < n_exploit * 20:
             attempts += 1
-            ma    = int(np.clip(
+            ma     = int(np.clip(
                 rng.integers(b_ma - EXPLOIT_MA_LEN_RADIUS, b_ma + EXPLOIT_MA_LEN_RADIUS + 1),
                 OPT_MA_LEN_MIN, OPT_MA_LEN_MAX))
             bm_x10 = int(np.clip(
                 rng.integers(b_bm_x10 - EXPLOIT_BAND_MULT_RADIUS_X10,
                              b_bm_x10 + EXPLOIT_BAND_MULT_RADIUS_X10 + 1),
                 OPT_BAND_MULT_X10_MIN, OPT_BAND_MULT_X10_MAX))
-            tp_bp = int(np.clip(
+            tp_bp  = int(np.clip(
                 rng.integers(b_tp_bp - EXPLOIT_TP_RADIUS_BP, b_tp_bp + EXPLOIT_TP_RADIUS_BP + 1),
                 OPT_TP_MIN_BP, OPT_TP_MAX_BP))
-            sl_bp = int(np.clip(
+            sl_bp  = int(np.clip(
                 rng.integers(b_sl_bp - EXPLOIT_SL_RADIUS_BP, b_sl_bp + EXPLOIT_SL_RADIUS_BP + 1),
                 OPT_SL_MIN_BP, OPT_SL_MAX_BP))
-            key = (ma, bm_x10, tp_bp, sl_bp)
+            exit_ma = int(np.clip(
+                rng.integers(b_exit_ma - EXPLOIT_EXIT_MA_LEN_RADIUS,
+                             b_exit_ma + EXPLOIT_EXIT_MA_LEN_RADIUS + 1),
+                OPT_EXIT_MA_LEN_MIN, OPT_EXIT_MA_LEN_MAX))
+            exit_bm_x10 = int(np.clip(
+                rng.integers(b_exit_bm_x10 - EXPLOIT_EXIT_BAND_MULT_RADIUS_X10,
+                             b_exit_bm_x10 + EXPLOIT_EXIT_BAND_MULT_RADIUS_X10 + 1),
+                OPT_EXIT_BAND_MULT_X10_MIN, OPT_EXIT_BAND_MULT_X10_MAX))
+            key = (ma, bm_x10, tp_bp, sl_bp, exit_ma, exit_bm_x10)
             if key not in seen:
                 seen.add(key)
                 combos.append(key)
@@ -154,11 +175,13 @@ def optimise_params(
     attempts = 0
     while len(combos) < trials and attempts < trials * 20:
         attempts += 1
-        ma     = int(rng.integers(OPT_MA_LEN_MIN,        OPT_MA_LEN_MAX        + 1))
-        bm_x10 = int(rng.integers(OPT_BAND_MULT_X10_MIN, OPT_BAND_MULT_X10_MAX + 1))
-        tp_bp  = int(rng.integers(OPT_TP_MIN_BP,          OPT_TP_MAX_BP         + 1))
-        sl_bp  = int(rng.integers(OPT_SL_MIN_BP,          OPT_SL_MAX_BP         + 1))
-        key = (ma, bm_x10, tp_bp, sl_bp)
+        ma          = int(rng.integers(OPT_MA_LEN_MIN,             OPT_MA_LEN_MAX             + 1))
+        bm_x10      = int(rng.integers(OPT_BAND_MULT_X10_MIN,      OPT_BAND_MULT_X10_MAX      + 1))
+        tp_bp       = int(rng.integers(OPT_TP_MIN_BP,              OPT_TP_MAX_BP              + 1))
+        sl_bp       = int(rng.integers(OPT_SL_MIN_BP,              OPT_SL_MAX_BP              + 1))
+        exit_ma     = int(rng.integers(OPT_EXIT_MA_LEN_MIN,        OPT_EXIT_MA_LEN_MAX        + 1))
+        exit_bm_x10 = int(rng.integers(OPT_EXIT_BAND_MULT_X10_MIN, OPT_EXIT_BAND_MULT_X10_MAX + 1))
+        key = (ma, bm_x10, tp_bp, sl_bp, exit_ma, exit_bm_x10)
         if key not in seen:
             seen.add(key)
             combos.append(key)
@@ -169,7 +192,9 @@ def optimise_params(
         print(f"  Entry — MA-len {OPT_MA_LEN_MIN}-{OPT_MA_LEN_MAX}  "
               f"BandMult {OPT_BAND_MULT_X10_MIN/10:.1f}-{OPT_BAND_MULT_X10_MAX/10:.1f}%")
         print(f"  Exit  — TP {OPT_TP_MIN_BP*0.01:.2f}%-{OPT_TP_MAX_BP*0.01:.2f}%  "
-              f"SL {OPT_SL_MIN_BP*0.01:.2f}%-{OPT_SL_MAX_BP*0.01:.2f}%  (band exit, no time exit)")
+              f"SL {OPT_SL_MIN_BP*0.01:.2f}%-{OPT_SL_MAX_BP*0.01:.2f}%")
+        print(f"  ExitBand — MA-len {OPT_EXIT_MA_LEN_MIN}-{OPT_EXIT_MA_LEN_MAX}  "
+              f"BandMult {OPT_EXIT_BAND_MULT_X10_MIN/10:.1f}-{OPT_EXIT_BAND_MULT_X10_MAX/10:.1f}%")
         if saved_best:
             print(f"  Mode: {n_exploit} exploitation + {len(combos)-n_exploit} exploration")
         else:
@@ -205,24 +230,26 @@ def optimise_params(
     n_workers    = min(os.cpu_count() or 2, 2)
 
     def _run_trial(combo):
-        ma, bm_x10, tp_bp, sl_bp = combo
-        band_mult = bm_x10 / 10.0
+        ma, bm_x10, tp_bp, sl_bp, exit_ma, exit_bm_x10 = combo
+        band_mult      = bm_x10      / 10.0
+        exit_band_mult = exit_bm_x10 / 10.0
         tp = tp_bp * 0.0001
         sl = sl_bp * 0.0001
         ep = EntryParams(ma_len=ma, band_mult=band_mult)
-        xp = ExitParams(tp_pct=tp, sl_pct=sl)
+        xp = ExitParams(tp_pct=tp, sl_pct=sl,
+                        exit_ma_len=exit_ma, exit_band_mult=exit_band_mult)
         res = backtest_once(
             dfl, dfm, risk_df, ep, xp, leverage, fee_rate, maker_fee_rate,
             time_tp_pct=_time_tp_pct,
             interval_minutes_bt=interval_minutes,
         )
-        return ma, bm_x10, tp_bp, sl_bp, band_mult, tp, sl, res
+        return ma, bm_x10, tp_bp, sl_bp, exit_ma, exit_bm_x10, band_mult, exit_band_mult, tp, sl, res
 
     with ThreadPoolExecutor(max_workers=n_workers) as executor:
         futures = {executor.submit(_run_trial, combo): combo for combo in combos}
         for future in as_completed(futures):
             try:
-                ma, bm_x10, tp_bp, sl_bp, band_mult, tp, sl, res = future.result()
+                ma, bm_x10, tp_bp, sl_bp, exit_ma, exit_bm_x10, band_mult, exit_band_mult, tp, sl, res = future.result()
             except Exception as _exc:
                 log.debug(f"[OPT] Trial raised: {_exc}")
                 res = None
@@ -257,6 +284,8 @@ def optimise_params(
                 "band_mult":        band_mult,
                 "tp_pct":           tp,
                 "sl_pct":           sl,
+                "exit_ma_len":      exit_ma,
+                "exit_band_mult":   exit_band_mult,
                 "trades":           res.trades,
                 "n_wins":           len(wins),
                 "n_losses":         len(losses),
@@ -291,6 +320,8 @@ def optimise_params(
     best_exit = ExitParams(
         tp_pct=best["tp_pct"],
         sl_pct=best["sl_pct"],
+        exit_ma_len=best["exit_ma_len"],
+        exit_band_mult=best["exit_band_mult"],
     )
     best_res = best["_result_obj"]
 
@@ -298,8 +329,9 @@ def optimise_params(
         pf_str = f"{best['profit_factor']:.2f}" if best["profit_factor"] != float("inf") else "inf"
         print(
             f"\n✓ OPTIMISATION COMPLETE [{event_name}]:\n"
-            f"  Entry — MA-len={best_entry.ma_len}  BandMult={best_entry.band_mult:.2f}%\n"
-            f"  Exit  — TP={best_exit.tp_pct*100:.2f}%  SL={best_exit.sl_pct*100:.2f}%\n"
+            f"  Entry    — MA-len={best_entry.ma_len}  BandMult={best_entry.band_mult:.2f}%\n"
+            f"  ExitBand — MA-len={best_exit.exit_ma_len}  BandMult={best_exit.exit_band_mult:.2f}%\n"
+            f"  TP={best_exit.tp_pct*100:.2f}%  SL={best_exit.sl_pct*100:.2f}%\n"
             f"  Wins={best['n_wins']}  Losses={best['n_losses']}  WinRate={best['win_rate']:.1f}%  "
             f"PF={pf_str}  Return={best['return_pct']:.2f}%  Trades={best['trades']}\n"
         )

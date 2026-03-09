@@ -137,7 +137,7 @@ class LiveRealTrader:
 
     def _recompute_indicators(self):
         """Rebuild bands, ADX, and RSI columns from raw OHLCV data."""
-        min_len = self.entry_params.ma_len + 20
+        min_len = max(self.entry_params.ma_len, self.exit_params.exit_ma_len) + 20
         if len(self.df) < min_len:
             return
         base    = self.df[["ts", "open", "high", "low", "close", "volume"]].copy()
@@ -145,6 +145,8 @@ class LiveRealTrader:
             base,
             ma_len=self.entry_params.ma_len,
             band_mult=self.entry_params.band_mult,
+            exit_ma_len=self.exit_params.exit_ma_len,
+            exit_band_mult=self.exit_params.exit_band_mult,
         )
 
     # ── Order helpers ─────────────────────────────────────────────────────────
@@ -664,9 +666,12 @@ class LiveRealTrader:
             maker_fee = maker_fee_for(self.symbol)
 
             saved_best = {
-                "ma_len":    self.entry_params.ma_len,
-                "band_mult": self.entry_params.band_mult,
-                "tp_pct":    self.exit_params.tp_pct,
+                "ma_len":         self.entry_params.ma_len,
+                "band_mult":      self.entry_params.band_mult,
+                "tp_pct":         self.exit_params.tp_pct,
+                "sl_pct":         self.exit_params.sl_pct,
+                "exit_ma_len":    self.exit_params.exit_ma_len,
+                "exit_band_mult": self.exit_params.exit_band_mult,
             }
 
             opt = optimise_params(
@@ -836,7 +841,7 @@ class LiveRealTrader:
                 acted = True
 
             # ── Warm-up guard ──
-            min_len = self.entry_params.ma_len + 20
+            min_len = max(self.entry_params.ma_len, self.exit_params.exit_ma_len) + 20
             if len(self.df) < min_len or "adx" not in self.df.columns:
                 log.info(
                     f"[{ts_utc}] {self.symbol} Candle #{self.closed_candle_count} "

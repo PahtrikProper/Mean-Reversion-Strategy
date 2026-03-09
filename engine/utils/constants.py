@@ -51,9 +51,11 @@ TIME_TP_FALLBACK_PCT = 0.005  # 0.5% fallback when DB has insufficient data
 TIME_TP_SCALE        = 0.75   # scale factor applied to the data-driven avg
 
 # ── Default strategy parameters ───────────────────────────────────────────────
-DEFAULT_MA_LEN       = 100    # RMA period for band centre line
-DEFAULT_BAND_MULT    = 2.5    # Band width multiplier (%)
-DEFAULT_TP_PCT       = 0.0028 # 0.28% take-profit (optimised; ~midpoint of range)
+DEFAULT_MA_LEN         = 100    # RMA period for entry (premium) band centre line
+DEFAULT_BAND_MULT      = 2.5    # Entry band width multiplier (%)
+DEFAULT_EXIT_MA_LEN    = 100    # RMA period for exit (discount) band centre line
+DEFAULT_EXIT_BAND_MULT = 2.5    # Exit band width multiplier (%)
+DEFAULT_TP_PCT         = 0.0028 # 0.28% take-profit (optimised; ~midpoint of range)
 
 # ── Hard stop-loss (SHORT exit) ───────────────────────────────────────────────
 # Fires when: current_high >= entry_price * (1 + sl_pct)
@@ -67,13 +69,21 @@ STOP_LOSS_PCT = 0.05     # default 5.0% above entry (optimised at runtime)
 INIT_TRIALS          = 4000
 REOPT_INTERVAL_SEC   = 12 * 60 * 60  # re-optimise every 12 hours
 
-# Entry — MA length (RMA period for band centre line)
+# Entry — MA length (RMA period for premium band centre line)
 OPT_MA_LEN_MIN        = 2
 OPT_MA_LEN_MAX        = 300
 
 # Entry — Band multiplier (stored as integer × 10: 3 = 0.3, 100 = 10.0)
 OPT_BAND_MULT_X10_MIN = 3    # 0.3%
 OPT_BAND_MULT_X10_MAX = 100  # 10.0%
+
+# Exit — MA length (RMA period for discount band centre line; independent of entry)
+OPT_EXIT_MA_LEN_MIN        = 2
+OPT_EXIT_MA_LEN_MAX        = 300
+
+# Exit — Band multiplier (stored as integer × 10; independent of entry)
+OPT_EXIT_BAND_MULT_X10_MIN = 3    # 0.3%
+OPT_EXIT_BAND_MULT_X10_MAX = 100  # 10.0%
 
 # Take-profit (in basis points, 1 bp = 0.0001; 18 = 0.18%, 1100 = 11.00%)
 OPT_TP_MIN_BP       = 18    # 0.18% price move before leverage
@@ -90,11 +100,13 @@ OPT_MIN_TRADES    = 1
 RANDOM_SEED       = None     # set int for reproducible runs
 
 # Exploitation: sample near saved best params
-EXPLOIT_RATIO                = 0.60
-EXPLOIT_MA_LEN_RADIUS        = 15
-EXPLOIT_BAND_MULT_RADIUS_X10 = 3    # ±0.3 around saved best band_mult
-EXPLOIT_TP_RADIUS_BP         = 50   # ±0.50% around saved best TP
-EXPLOIT_SL_RADIUS_BP         = 50   # ±0.50% around saved best SL
+EXPLOIT_RATIO                     = 0.60
+EXPLOIT_MA_LEN_RADIUS             = 15
+EXPLOIT_BAND_MULT_RADIUS_X10      = 3    # ±0.3 around saved best entry band_mult
+EXPLOIT_TP_RADIUS_BP              = 50   # ±0.50% around saved best TP
+EXPLOIT_SL_RADIUS_BP              = 50   # ±0.50% around saved best SL
+EXPLOIT_EXIT_MA_LEN_RADIUS        = 15
+EXPLOIT_EXIT_BAND_MULT_RADIUS_X10 = 3    # ±0.3 around saved best exit band_mult
 
 # ── Runtime behaviour ─────────────────────────────────────────────────────────
 KEEP_CANDLES            = 3000

@@ -15,6 +15,7 @@ Exit:
 
 import pandas as pd
 import numpy as np
+from typing import Optional
 
 # ─── Fixed gate constants ────────────────────────────────────────────────────────
 
@@ -221,20 +222,33 @@ def build_indicators(
     df_raw: pd.DataFrame,
     ma_len: int,
     band_mult: float,
+    exit_ma_len: Optional[int] = None,
+    exit_band_mult: Optional[float] = None,
 ) -> pd.DataFrame:
     """Build all indicators needed for entry and exit.
 
     Required columns: ts, open, high, low, close, volume
 
     Adds:
-        main           — RMA(close, ma_len)
-        premium_1..8   — EMA-smoothed premium bands   (entry signals)
-        discount_1..8  — EMA-smoothed discount bands  (exit signals)
+        main           — RMA(close, ma_len)                              (entry centre line)
+        premium_1..8   — EMA-smoothed premium bands   (entry signals; uses ma_len + band_mult)
+        discount_1..8  — EMA-smoothed discount bands  (exit signals;  uses exit_ma_len + exit_band_mult
+                          when provided, otherwise falls back to ma_len + band_mult)
         adx            — ADX(14) Wilder (entry gate)
         rsi            — RSI(14) Wilder (entry gate)
         atr            — ATR(14) Wilder  (retained for diagnostic DB logging)
     """
+    # Build entry (premium) bands — and discount bands from same params as baseline
     df = build_bands(df_raw.copy(), ma_len, band_mult)
+
+    # Overwrite discount_k columns with exit-specific params when they differ
+    _exit_ma = exit_ma_len    if exit_ma_len    is not None else ma_len
+    _exit_bm = exit_band_mult if exit_band_mult is not None else band_mult
+    if _exit_ma != ma_len or _exit_bm != band_mult:
+        df_exit = build_bands(df_raw.copy(), _exit_ma, _exit_bm)
+        for k in range(1, 9):
+            df[f"discount_{k}"] = df_exit[f"discount_{k}"].values
+
     df["adx"] = calculate_adx(df, ADX_PERIOD)
     df["rsi"] = calculate_rsi(df, RSI_PERIOD)
     df["atr"] = calculate_atr(df, ADX_PERIOD)   # ADX_PERIOD = 14
