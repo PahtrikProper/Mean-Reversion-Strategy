@@ -441,8 +441,10 @@ class LiveRealTrader:
             except Exception:
                 pass
         finally:
-            if self.position is None:
-                self.gate.release(self.symbol)
+            # Release gate unconditionally so the slot is always freed after any
+            # exit attempt.  _handle_external_close will resync position state on
+            # the next candle if the REST query returns the position as still open.
+            self.gate.release(self.symbol)
 
     # ── External close handler ─────────────────────────────────────────────────
 
