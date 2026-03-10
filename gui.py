@@ -1027,6 +1027,38 @@ class App(ctk.CTk):
         )
         self._lbl_leverage_status.grid(row=4, column=3, padx=14, pady=(0, 12), sticky="w")
 
+        # ── Take Profit row ───────────────────────────────────────────────────
+        ctk.CTkLabel(
+            self._risk_body, text="Take Profit:",
+            font=ctk.CTkFont(size=13), text_color="#c9d1d9",
+        ).grid(row=5, column=0, padx=(14, 8), pady=(0, 12), sticky="w")
+
+        _tp_options = ["0.2%", "0.3%", "0.4%", "0.5%"]
+        _tp_default = f"{C.DEFAULT_TP_PCT * 100:.1f}%"
+        if _tp_default not in _tp_options:
+            _tp_default = "0.3%"
+        self._tp_var = ctk.StringVar(value=_tp_default)
+        self._tp_menu = ctk.CTkOptionMenu(
+            self._risk_body,
+            values=_tp_options,
+            variable=self._tp_var,
+            width=90,
+        )
+        self._tp_menu.grid(row=5, column=1, padx=(0, 8), pady=(0, 12))
+
+        self._btn_apply_tp = ctk.CTkButton(
+            self._risk_body, text="Apply", width=80,
+            command=self._apply_tp,
+        )
+        self._btn_apply_tp.grid(row=5, column=2, padx=(0, 14), pady=(0, 12), sticky="w")
+
+        self._lbl_tp_status = ctk.CTkLabel(
+            self._risk_body,
+            text=f"Current: {C.DEFAULT_TP_PCT * 100:.1f}%  (applied before analysis starts)",
+            text_color="#8b949e", font=ctk.CTkFont(size=12),
+        )
+        self._lbl_tp_status.grid(row=5, column=3, padx=14, pady=(0, 12), sticky="w")
+
 
         # ── Controls ──────────────────────────────────────────────────────────
         ctrl = ctk.CTkFrame(self._scroll, fg_color="#161b22", corner_radius=8)
@@ -1502,6 +1534,19 @@ class App(ctk.CTk):
             C.LEVERAGE_BY_SYMBOL[sym] = lev
         self._lbl_leverage_status.configure(
             text=f"Current: {int(lev)}x  (paper — live syncs from Bybit)",
+            text_color="#3fb950",
+        )
+
+    def _apply_tp(self) -> None:
+        raw = self._tp_var.get().replace("%", "").strip()
+        try:
+            pct = float(raw)
+        except ValueError:
+            return
+        pct = round(max(0.1, min(5.0, pct)), 4)
+        C.DEFAULT_TP_PCT = pct / 100.0
+        self._lbl_tp_status.configure(
+            text=f"Current: {pct:.1f}%  (applied before analysis starts)",
             text_color="#3fb950",
         )
 
