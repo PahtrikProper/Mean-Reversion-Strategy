@@ -27,7 +27,6 @@ from ..utils.constants import (
     STARTING_WALLET,
     SLIPPAGE_TICKS,
     TICK_SIZE,
-    DEFAULT_TP_PCT,
     TIME_TP_HOURS,
 )
 from ..utils.data_structures import TradeRecord, BacktestResult, MCSimResult, EntryParams, ExitParams

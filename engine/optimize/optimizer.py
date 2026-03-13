@@ -36,7 +36,6 @@ from tqdm import tqdm
 
 from ..utils.constants import (
     STARTING_WALLET,
-    DEFAULT_TP_PCT,
     STOP_LOSS_PCT,
     DEFAULT_EXIT_MA_LEN,
     DEFAULT_EXIT_BAND_MULT,
@@ -58,6 +57,7 @@ from ..utils.constants import (
     TIME_TP_FALLBACK_PCT,
     TIME_TP_SCALE,
 )
+from ..utils import constants as _C
 from ..utils.data_structures import EntryParams, ExitParams
 from ..utils import db_logger as _db
 from ..utils.plotting import plot_pnl_chart
@@ -181,7 +181,7 @@ def optimise_params(
         print(f"\nTesting {total} param combos  [{event_name}]")
         print(f"  Entry — MA-len {OPT_MA_LEN_MIN}-{OPT_MA_LEN_MAX}  "
               f"BandMult {OPT_BAND_MULT_X10_MIN/10:.1f}-{OPT_BAND_MULT_X10_MAX/10:.1f}%")
-        print(f"  Exit  — TP fixed {DEFAULT_TP_PCT*100:.2f}%  "
+        print(f"  Exit  — TP fixed {_C.DEFAULT_TP_PCT*100:.2f}%  "
               f"SL {OPT_SL_MIN_BP*0.01:.2f}%-{OPT_SL_MAX_BP*0.01:.2f}%")
         print(f"  ExitBand — MA-len {OPT_EXIT_MA_LEN_MIN}-{OPT_EXIT_MA_LEN_MAX}  "
               f"BandMult {OPT_EXIT_BAND_MULT_X10_MIN/10:.1f}-{OPT_EXIT_BAND_MULT_X10_MAX/10:.1f}%")
@@ -223,7 +223,7 @@ def optimise_params(
         ma, bm_x10, sl_bp, exit_ma, exit_bm_x10 = combo
         band_mult      = bm_x10      / 10.0
         exit_band_mult = exit_bm_x10 / 10.0
-        tp = DEFAULT_TP_PCT  # fixed — not optimised
+        tp = _C.DEFAULT_TP_PCT  # read at runtime so GUI changes take effect
         sl = sl_bp * 0.0001
         ep = EntryParams(ma_len=ma, band_mult=band_mult)
         xp = ExitParams(tp_pct=tp, sl_pct=sl,
