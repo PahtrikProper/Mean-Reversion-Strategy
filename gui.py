@@ -448,13 +448,22 @@ class _BotController:
                            f"PnL={_br.pnl_pct:+.2f}%  Score={_d['score']:.4f}",
                            f"Best: {_d['interval']}m")
                 self._emit("best_params", {
-                    "ma_len":     _ep.ma_len,
-                    "band_mult":  _ep.band_mult,
-                    "tp_pct":     _xp.tp_pct * 100.0,
-                    "n_wins":     _n_wins,
-                    "n_losses":   _n_losses,
-                    "trades":     _br.trades,
-                    "return_pct": _br.pnl_pct,
+                    "symbol":        _sym,
+                    "interval":      _d["interval"],
+                    "leverage":      leverage_for(_sym),
+                    "ma_len":        _ep.ma_len,
+                    "band_mult":     _ep.band_mult,
+                    "tp_pct":        _xp.tp_pct * 100.0,
+                    "sl_pct":        _xp.sl_pct * 100.0,
+                    "exit_ma_len":   _xp.exit_ma_len,
+                    "exit_band_mult": _xp.exit_band_mult,
+                    "n_wins":        _n_wins,
+                    "n_losses":      _n_losses,
+                    "trades":        _br.trades,
+                    "winrate":       _br.winrate,
+                    "return_pct":    _br.pnl_pct,
+                    "sharpe":        _br.sharpe_ratio,
+                    "max_dd":        _br.max_drawdown_pct,
                 })
 
             # ── Initialize live traders ───────────────────────────────────────
@@ -681,13 +690,22 @@ class _PaperBotController:
                            f"PnL={_br.pnl_pct:+.2f}%  Score={_d['score']:.4f}",
                            f"Best: {_d['interval']}m")
                 self._emit("best_params", {
-                    "ma_len":       _ep.ma_len,
-                    "band_mult":    _ep.band_mult,
-                    "tp_pct":       _xp.tp_pct * 100.0,
-                    "n_wins":       _n_wins,
-                    "n_losses":     _n_losses,
-                    "trades":       _br.trades,
-                    "return_pct":   _br.pnl_pct,
+                    "symbol":         _sym,
+                    "interval":       _d["interval"],
+                    "leverage":       leverage_for(_sym),
+                    "ma_len":         _ep.ma_len,
+                    "band_mult":      _ep.band_mult,
+                    "tp_pct":         _xp.tp_pct * 100.0,
+                    "sl_pct":         _xp.sl_pct * 100.0,
+                    "exit_ma_len":    _xp.exit_ma_len,
+                    "exit_band_mult": _xp.exit_band_mult,
+                    "n_wins":         _n_wins,
+                    "n_losses":       _n_losses,
+                    "trades":         _br.trades,
+                    "winrate":        _br.winrate,
+                    "return_pct":     _br.pnl_pct,
+                    "sharpe":         _br.sharpe_ratio,
+                    "max_dd":         _br.max_drawdown_pct,
                 })
 
             traders: Dict[str, Any] = {}
@@ -1742,22 +1760,30 @@ class App(ctk.CTk):
 
     # ── Best strategy display ─────────────────────────────────────────────────
     def _update_best_params(self, d: dict) -> None:
+        sym      = d.get("symbol", "")
+        interval = d.get("interval", "")
+        lev      = d.get("leverage", C.DEFAULT_LEVERAGE)
         ep_str = (
-            f"Entry  ·  MA Length: {d['ma_len']}  "
-            f"Band Mult: {d['band_mult']:.2f}%"
+            f"{sym}  ·  {interval}m  ·  {int(lev)}×  │  "
+            f"Entry MA: {d['ma_len']}  BandMult: {d['band_mult']:.2f}%"
         )
         xp_str = (
-            f"Exit   ·  TP: {d['tp_pct']:.2f}%  ·  SL: {d.get('sl_pct', 5.0):.2f}%  ·  Band Exit"
+            f"Exit  ·  TP: {d['tp_pct']:.2f}%  ·  SL: {d.get('sl_pct', 5.0):.2f}%  ·  Band Exit"
         )
-        sign  = "+" if d["return_pct"] >= 0 else ""
-        rc    = "#3fb950" if d["return_pct"] >= 0 else "#f85149"
+        xi_str = (
+            f"Exit Band  ·  MA: {d.get('exit_ma_len', '—')}  "
+            f"BandMult: {d.get('exit_band_mult', 0):.2f}%"
+        )
+        sign = "+" if d["return_pct"] >= 0 else ""
+        rc   = "#3fb950" if d["return_pct"] >= 0 else "#f85149"
         st_str = (
-            f"Wins: {d['n_wins']}  ·  Losses: {d['n_losses']}  ·  "
-            f"Trades: {d['trades']}  ·  Return: {sign}{d['return_pct']:.2f}%"
+            f"Trades: {d['trades']}  ·  W/L: {d['n_wins']}/{d['n_losses']}  ·  "
+            f"WR: {d.get('winrate', 0):.0f}%  ·  Return: {sign}{d['return_pct']:.2f}%  ·  "
+            f"Sharpe: {d.get('sharpe', 0):.2f}  ·  Max DD: {d.get('max_dd', 0):.1f}%"
         )
         self._lbl_best_entry.configure(text=ep_str)
         self._lbl_best_exit.configure(text=xp_str)
-        self._lbl_best_exit_ind.configure(text="")
+        self._lbl_best_exit_ind.configure(text=xi_str)
         self._lbl_best_stats.configure(text=st_str, text_color=rc)
         self._best_outer.grid()
 
