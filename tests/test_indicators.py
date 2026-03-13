@@ -174,23 +174,23 @@ class TestResolveEntrySignals:
         """ADX < 25 should pass the ADX gate."""
         raw = 3
         result = resolve_entry_signals(raw_short=raw, adx=ADX_THRESHOLD - 0.01, rsi=60.0)
-        # RSI gate (>= 40) also passes — signal should fire
+        # RSI gate (>= 50) also passes — signal should fire
         assert result > 0
 
-    def test_rsi_blocks_when_oversold(self):
-        """RSI < 40 should block signal (already deeply oversold)."""
+    def test_rsi_blocks_when_below_neutral(self):
+        """RSI < 50 should block signal (close not confirming overbought)."""
         raw = 3
         result = resolve_entry_signals(raw_short=raw, adx=20.0, rsi=RSI_NEUTRAL_LO - 0.01)
         assert result == 0
 
     def test_rsi_at_threshold_passes(self):
-        """RSI == 40 (at exact threshold) should pass."""
+        """RSI == 50 (at exact threshold) should pass."""
         raw = 3
         result = resolve_entry_signals(raw_short=raw, adx=20.0, rsi=RSI_NEUTRAL_LO)
         assert result > 0
 
     def test_both_gates_pass(self):
-        """Both ADX < 25 and RSI >= 40 pass → signal returned unchanged."""
+        """Both ADX < 25 and RSI >= 50 pass → signal returned unchanged."""
         raw = 5
         result = resolve_entry_signals(raw_short=raw, adx=15.0, rsi=55.0)
         assert result == raw

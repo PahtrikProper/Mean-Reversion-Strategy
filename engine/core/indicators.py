@@ -5,7 +5,7 @@ Entry (SHORT only):
      premium_k = EMA(main * (1 + band_mult% * k), 5),  k in 1..8
   2. Raw signal: high[prev] >= premium_k[prev]  AND  high[now] < premium_k[now]
      (high drops back below premium band after touching/exceeding it)
-  3. Gates: ADX < 25 (range-bound market) AND RSI >= 40 (not oversold)
+  3. Gates: ADX < 25 (range-bound market) AND RSI >= 50 (neutral-to-overbought close)
 
 Exit:
   TP:          low  <= entry * (1 - tp_pct)
@@ -22,7 +22,7 @@ from typing import Optional
 ADX_PERIOD     = 14
 ADX_THRESHOLD  = 25.0
 RSI_PERIOD     = 14
-RSI_NEUTRAL_LO = 40.0
+RSI_NEUTRAL_LO = 50.0
 BAND_EMA_LENGTH = 5
 
 
@@ -175,7 +175,7 @@ def calculate_rsi(df: pd.DataFrame, period: int = RSI_PERIOD) -> np.ndarray:
     """Calculate RSI using Wilder's method.
 
     RSI > 70 = overbought (confirms SHORT fade)
-    RSI < 40 = deeply oversold (blocks SHORT — don't fade exhausted moves)
+    RSI < 50 = close below neutral — blocks SHORT (price not confirmed overbought at close)
 
     Returns array aligned with df rows; first value is np.nan (lost due to diff).
     """
@@ -347,7 +347,8 @@ def resolve_entry_signals(raw_short: int, adx: float, rsi: float) -> int:
     Gate 1 — ADX regime (checked first):
         ADX >= 25 → trending market → block ALL SHORT entries
     Gate 2 — RSI confirmation:
-        RSI < 40  → already deeply oversold → block SHORT (don't chase)
+        RSI < 50  → close below neutral → block SHORT (close must confirm overbought; don't fade a
+                    move where the candle already closed weakly)
 
     Returns final signal (0 = no trade, 1-8 = band level).
     """

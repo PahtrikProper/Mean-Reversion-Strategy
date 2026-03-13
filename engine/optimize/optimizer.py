@@ -4,7 +4,7 @@ Searches for the best combination of:
   EntryParams: ma_len, band_mult
   ExitParams:  sl_pct  (tp_pct is fixed at DEFAULT_TP_PCT — not optimised)
 
-ADX_THRESHOLD (25) and RSI_NEUTRAL_LO (40) are fixed — not optimised.
+ADX_THRESHOLD (25) and RSI_NEUTRAL_LO (50) are fixed — not optimised.
 
 band_mult is stored as an integer × 10 (3 = 0.3, 100 = 10.0) during search
 for efficient integer arithmetic, then converted to float for EntryParams.
@@ -88,7 +88,7 @@ def optimise_params(
     """Random search over (ma_len, band_mult, sl_pct, exit_ma_len, exit_band_mult).
 
     band_mult / exit_band_mult are searched as integer × 10 for efficiency.
-    ADX_THRESHOLD=25 and RSI_NEUTRAL_LO=40 are fixed constants (not optimised).
+    ADX_THRESHOLD=25 and RSI_NEUTRAL_LO=50 are fixed constants (not optimised).
     tp_pct is FIXED at DEFAULT_TP_PCT (0.30%) — not part of the search space.
     sl_pct is optimised in range OPT_SL_MIN_BP–OPT_SL_MAX_BP (0.50–9.00% above entry).
     exit_ma_len / exit_band_mult control the discount band geometry independently.

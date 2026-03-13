@@ -8,7 +8,7 @@
   "fee_rate": 0.00055,
   "maker_fee_rate": 0.0002,
   "entry": {
-    "_comment": "Entry: high drops below premium_k band AND ADX<25 AND RSI>=40",
+    "_comment": "Entry: high drops below premium_k band AND ADX<25 AND RSI>=50",
     "ma_len": 100,
     "band_mult": 2.5
   },

@@ -6,7 +6,7 @@ Uses MARK-price OHLCV for liquidation checks (mark high >= liq_price).
 Entry:
     high drops back below premium_k band (band crossover)
     AND ADX < 25  (range-bound regime)
-    AND RSI >= 40 (not deeply oversold)
+    AND RSI >= 50 (neutral-to-overbought close confirms the fade)
 
 Exit priority per candle:
   1. Liquidation  (mark high >= liq_price)

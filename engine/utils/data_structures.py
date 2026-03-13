@@ -84,7 +84,7 @@ class EntryParams:
     Entry fires when:
         high drops back below premium_k band (crossover of band above high)
         AND ADX < 25 (range-bound regime)
-        AND RSI >= 40 (not deeply oversold)
+        AND RSI >= 50 (neutral-to-overbought close confirms the fade)
     """
     ma_len:    int   = DEFAULT_MA_LEN    # RMA period for band centre line
     band_mult: float = DEFAULT_BAND_MULT # Band width multiplier (%)
