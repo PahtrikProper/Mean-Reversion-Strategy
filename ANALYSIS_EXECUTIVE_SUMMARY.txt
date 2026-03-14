@@ -1,0 +1,173 @@
+================================================================================
+CANDLE ANALYTICS ANALYSIS — EXECUTIVE SUMMARY
+================================================================================
+
+Generated: 2026-03-13
+Data Period: ~5 days of live trading (1008 candles)
+Completed Trades: 6 (too small for robust conclusions)
+
+================================================================================
+KEY FINDINGS
+================================================================================
+
+1. ADX DISTRIBUTION IS HEALTHY
+   ✓ 3-min ADX median = 25.13 (strong trending capability)
+   ✓ 5-min ADX median = 20.51 (more ranging; needs looser gate)
+   ✓ 15-min ADX median = 23.33 (balanced)
+   → Current ADX >= 25 gate is REASONABLE but slightly tight
+   → Recommend testing ADX >= 20–25 range to increase signal capture
+
+2. RSI DISTRIBUTION IS NEUTRAL (GOOD FOR MEAN REVERSION)
+   ✓ All intervals show RSI mean ~48–52 (classic ranging zone)
+   ✓ Current RSI < 40 gate allows 76–100% of signals (very permissive)
+   ⚠ Trade #2 loss: RSI=66.46 at entry (OVERBOUGHT!) — gate may have failed
+   → Current gate is appropriate
+   → VERIFY RSI gate logic in code; Trade #2 suggests it didn't fire
+
+3. VOLUME & ATR PROFILES REASONABLE FOR STRATEGY
+   ✓ Volume ratio median ~0.78–0.80 (normal market conditions)
+   ✓ ATR% median: 3-min=0.19%, 5-min=0.21%, 15-min=0.41%
+   → TP targets of 0.28–3.83% are REALISTIC on all intervals
+   → 3-min trades need tighter stops due to low ATR%; position size is critical
+
+4. BAND LEVEL DISTRIBUTION SHOWS GOOD VARIETY
+   ✓ 3-min captures levels 1–7 (band_mult range is appropriate)
+   ✓ 15-min conservative (50% level 1)
+   ✓ 5-min biased toward level 3 (wider bands active)
+   → No need to change BAND_MULT fundamentally; test ±20% range
+
+5. CRITICAL ISSUE: TP TARGETS NOT BEING HIT
+   ✗ Actual moves: -1.11%, -4.55%, 0.0%, 0.0%, +0.16%, 0.0%
+   ✗ Only 1 trade captured correct direction (+0.16%)
+   ✗ Most "BAND_ENTRY" exits show 0% move (entry = exit price)
+   → Suggests BAND_EXIT may be firing immediately after entry
+   → Or early-phase data with liquidations/external closes
+   → Action: Verify BAND_EXIT logic; check live fill accuracy
+
+================================================================================
+URGENT ACTIONS (This Week)
+================================================================================
+
+ACTION 1: VERIFY RSI GATE LOGIC
+   Problem: Trade #2 entered at RSI=66.46 (clearly overbought)
+   Current gate: RSI < 40 should have BLOCKED this
+   Action: Review code in live_trader.py/_execute_entry() 
+           Confirm RSI gate is being enforced correctly
+   Impact: HIGH — suggests gate may be silent or misconfigured
+
+ACTION 2: CHECK BAND_EXIT BEHAVIOR
+   Problem: Multiple 0.0% move exits (entry price = exit price)
+   Possible causes:
+   - BAND_EXIT triggering on next candle close
+   - Fill slippage not being captured
+   - Paper trading vs live discrepancy
+   Action: Inspect trade log; check order fills vs recorded prices
+   Impact: HIGH — affects all TP calibration
+
+ACTION 3: COLLECT 30+ MORE TRADES BEFORE RE-OPTIMIZING
+   Current data: 6 trades (insufficient sample)
+   Backtest data: 1008 candles, 55 signals on 3-min only
+   Action: Run 2–4 weeks of live trading; gather ~50 trades
+   Impact: MEDIUM — optimizer needs data to tune effectively
+
+================================================================================
+RECOMMENDED OPTIMIZER SEARCH RANGES
+================================================================================
+
+For next optimization run, use these ranges:
+
+  MA_LEN:      50 – 150  (current: 84)      [±40% tolerance]
+  BAND_MULT:   0.35 – 1.2  (current: 0.4–0.9) [extend upper bound]
+  ADX_MIN:     20 – 28   (current: 25)      [critical sensitivity]
+  RSI_MAX:     38 – 50   (current: 40)      [fine-tuning only]
+  TP_PCT:      0.002 – 0.010  (current: 0.28–3.83%) [1.5–2x range]
+
+Priority for tuning:
+  1. MA_LEN (high impact on signal quality)
+  2. BAND_MULT (affects band crossing detection)
+  3. TP_PCT (affects win rate vs capture frequency)
+  4. ADX_MIN (medium sensitivity on 3-min, low on 15-min)
+  5. RSI_MAX (low priority; current value is sound)
+
+See OPTIMIZER_SEARCH_RANGES.md for detailed rationale.
+
+================================================================================
+INTERVAL-SPECIFIC INSIGHTS
+================================================================================
+
+3-MIN INTERVAL (528 candles, 55 signals) — MOST ACTIVE
+  • ADX: Mean 27.94, Median 25.13 (trendy; supports ADX >= 20–25)
+  • RSI: Mean 51.98, Median 53.43 (neutral-overbought)
+  • Band Levels: 1–7 (high variety)
+  • ATR%: 0.19% median (tight; requires small TP targets, ~0.3–0.5%)
+  • Action: This interval dominates trading; optimize here first
+
+5-MIN INTERVAL (318 candles, 11 signals)
+  • ADX: Mean 22.83, Median 20.51 (choppy; may need ADX >= 20)
+  • RSI: Mean 48.48, Median 48.74 (neutral)
+  • Band Levels: 45% level 3 (wider bands active)
+  • ATR%: 0.21% median (medium; TP targets 0.4–0.6%)
+  • Action: Limited trading; may need separate optimization
+
+15-MIN INTERVAL (162 candles, 12 signals)
+  • ADX: Mean 25.26, Median 23.33 (trending)
+  • RSI: Mean 51.33, Median 50.12 (neutral)
+  • Band Levels: 50% level 1 (conservative)
+  • ATR%: 0.41% median (large; TP targets 0.5–1.0%)
+  • Action: Very few signals; may not optimize independently
+
+================================================================================
+RISK ASSESSMENT
+================================================================================
+
+Data Quality Risk: MEDIUM
+  • Only 6 trades (very small sample)
+  • No historical optimization runs (can't compare)
+  • 1008 candles is ~5 days of data (short backtest period)
+  • Recommendation: Gather 7–14 days (2000+ candles) before full re-optimization
+
+Gate Logic Risk: HIGH
+  • Trade #2 RSI anomaly suggests RSI gate may not be firing
+  • Multiple 0% move exits suggest BAND_EXIT timing issue
+  • Recommendation: Verify gates in code before deploying optimized params
+
+Market Risk: MEDIUM
+  • Mean-reversion strategy on XRPUSDT only
+  • 5-day sample includes low-volatility period
+  • Recommendation: Backtest across multiple market regimes
+
+================================================================================
+NEXT STEPS (PRIORITY ORDER)
+================================================================================
+
+WEEK 1: FIX & VERIFY
+  [ ] Verify RSI gate logic (Trade #2 anomaly)
+  [ ] Debug 0% move exits (BAND_EXIT timing)
+  [ ] Check fill accuracy in live vs paper trading
+  [ ] Add logging for all gated signal rejections
+
+WEEK 2–3: COLLECT DATA
+  [ ] Run live trading for 10–14 more days (~50 trades target)
+  [ ] Monitor for repeated issues (RSI, BAND_EXIT, slippage)
+  [ ] Record optimization attempts and results
+
+WEEK 4: OPTIMIZE & BACKTEST
+  [ ] Run optimizer with suggested ranges (5000–10000 trials)
+  [ ] Backtest best params on full 1–2 month historical period
+  [ ] A/B test best params in paper trading vs current baseline
+  [ ] Deploy to live only if backtest Sharpe > 1.0
+
+================================================================================
+FILES
+================================================================================
+
+Full Technical Report:
+  /Users/partyproper/Documents/Mean Reversion Trader/CANDLE_ANALYTICS_REPORT.md
+
+Quick Reference Guide:
+  /Users/partyproper/Documents/Mean Reversion Trader/OPTIMIZER_SEARCH_RANGES.md
+
+Database:
+  /Users/partyproper/Documents/Mean Reversion Trader/data/trading.db
+
+================================================================================

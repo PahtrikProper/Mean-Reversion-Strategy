@@ -190,7 +190,7 @@
   <div class="logo">⬛ MRT</div>
   <div class="sep"></div>
   <select class="tv-select" id="sel-symbol"></select>
-  <div class="tv-select" style="cursor:default;">15m</div>
+  <div class="tv-select" style="cursor:default;">5m</div>
   <div class="sep"></div>
   <div id="status-wrap">
     <div id="status-dot"></div>
@@ -502,7 +502,7 @@ function clearAll() {
 
 // ── Load history from REST ─────────────────────────────────────────────────────
 let symbol   = 'XRPUSDT';
-let interval = '15';
+let interval = '5';
 
 async function loadHistory() {
   document.getElementById('loading-msg').textContent = 'Loading chart data…';

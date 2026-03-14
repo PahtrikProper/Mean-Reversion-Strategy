@@ -93,7 +93,7 @@ def _apply_config(cfg: dict) -> None:
         xc = cfg["exit"]
         if "tp_pct"       in xc: C.DEFAULT_TP_PCT       = float(xc["tp_pct"])
     if "days_back_seed"   in cfg: C.DAYS_BACK_SEED      = int(cfg["days_back_seed"])
-    C.CANDLE_INTERVALS = ["15"]   # fixed — 15m only
+    C.CANDLE_INTERVALS = ["5"]    # fixed — 5m only
     if "risk_pct"         in cfg: C.MAX_SYMBOL_FRACTION  = float(cfg["risk_pct"])
     if "optimizer" in cfg:
         if "n_trials" in cfg["optimizer"]:
@@ -764,7 +764,7 @@ class App(ctk.CTk):
             font=ctk.CTkFont(size=13), text_color="#c9d1d9",
         ).grid(row=3, column=0, padx=(14, 8), pady=(0, 12), sticky="w")
         ctk.CTkLabel(
-            self._risk_body, text="15m  (fixed)",
+            self._risk_body, text="5m  (fixed)",
             font=ctk.CTkFont(size=13), text_color="#8b949e",
         ).grid(row=3, column=1, padx=(0, 8), pady=(0, 12), sticky="w")
 

@@ -6,7 +6,7 @@ from typing import Dict
 
 # ── Symbol & trading setup ────────────────────────────────────────────────────
 SYMBOLS          = ["XRPUSDT"]
-CANDLE_INTERVALS = ["15"]                   # 15m only
+CANDLE_INTERVALS = ["5"]                    # 5m only
 CATEGORY         = "spot"
 
 DAYS_BACK_SEED    = 30                       # history window for seed + re-opt (max 30 days)
