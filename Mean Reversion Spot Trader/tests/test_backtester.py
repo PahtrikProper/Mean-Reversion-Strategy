@@ -89,7 +89,7 @@ class TestBacktestOnce:
         df = _make_volatile_candles(400)
         risk_df = _make_risk_df()
         ep = EntryParams(ma_len=50, band_mult=1.5)
-        xp = ExitParams(tp_pct=0.005)
+        xp = ExitParams(tp_pct=0.005, leverage=10)
 
         result = backtest_once(
             df_last_raw=df,
@@ -97,7 +97,6 @@ class TestBacktestOnce:
             risk_df=risk_df,
             entry_params=ep,
             exit_params=xp,
-            leverage=10.0,
             fee_rate=0.00055,
             maker_fee_rate=0.0002,
         )
@@ -117,7 +116,7 @@ class TestBacktestOnce:
         df = _make_flat_candles(300)
         risk_df = _make_risk_df()
         ep = EntryParams(ma_len=50, band_mult=2.0)
-        xp = ExitParams(tp_pct=0.005)
+        xp = ExitParams(tp_pct=0.005, leverage=10)
 
         result = backtest_once(
             df_last_raw=df,
@@ -125,7 +124,6 @@ class TestBacktestOnce:
             risk_df=risk_df,
             entry_params=ep,
             exit_params=xp,
-            leverage=10.0,
             fee_rate=0.00055,
             maker_fee_rate=0.0002,
         )
@@ -138,7 +136,7 @@ class TestBacktestOnce:
         df = _make_volatile_candles(400, seed=7)
         risk_df = _make_risk_df()
         ep = EntryParams(ma_len=30, band_mult=0.5)
-        xp = ExitParams(tp_pct=0.003)
+        xp = ExitParams(tp_pct=0.003, leverage=10)
 
         result = backtest_once(
             df_last_raw=df,
@@ -146,7 +144,6 @@ class TestBacktestOnce:
             risk_df=risk_df,
             entry_params=ep,
             exit_params=xp,
-            leverage=10.0,
             fee_rate=0.00055,
             maker_fee_rate=0.0002,
         )
@@ -162,7 +159,7 @@ class TestBacktestOnce:
         df = _make_volatile_candles(400, seed=99)
         risk_df = _make_risk_df()
         ep = EntryParams(ma_len=40, band_mult=1.0)
-        xp = ExitParams(tp_pct=0.004)
+        xp = ExitParams(tp_pct=0.004, leverage=10)
 
         result = backtest_once(
             df_last_raw=df,
@@ -170,7 +167,6 @@ class TestBacktestOnce:
             risk_df=risk_df,
             entry_params=ep,
             exit_params=xp,
-            leverage=10.0,
             fee_rate=0.00055,
             maker_fee_rate=0.0002,
         )

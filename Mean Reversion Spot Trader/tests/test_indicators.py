@@ -117,45 +117,48 @@ class TestCrossover:
 # (prev_band <= prev_high  AND  curr_band > curr_high)
 
 class TestComputeEntrySignalsRaw:
-    def _make_rows(self, band_val, prev_high, curr_high):
-        """Make prev_row and curr_row Series with all premium bands + high."""
-        bands = {f"premium_{k}": band_val for k in range(1, 9)}
-        prev_row = pd.Series({**bands, "high": prev_high})
-        curr_row = pd.Series({**bands, "high": float("nan")})  # high unused from curr_row
+    def _make_rows(self, band_val, prev_low, curr_low_unused=None):
+        """Make prev_row and curr_row Series with all discount bands + low."""
+        bands = {f"discount_{k}": band_val for k in range(1, 9)}
+        prev_row = pd.Series({**bands, "low": prev_low})
+        curr_row = pd.Series({**bands, "low": float("nan")})  # low unused from curr_row
         return prev_row, curr_row
 
     def test_signal_fires_on_band_crossover(self):
-        """Band was below prev_high; after move band is above curr_high → signal."""
-        # band = 100, prev_high = 102 (band <= high), curr_high = 98 (band > high)
-        prev_row, curr_row = self._make_rows(band_val=100.0, prev_high=102.0, curr_high=100.0)
+        """prev_low touched discount band, curr_low bounced back above → LONG signal."""
+        # band=100, prev_low=98 (≤ band, in discount zone), curr_low=102 (> band, bounced)
+        prev_row, curr_row = self._make_rows(band_val=100.0, prev_low=98.0)
         result = compute_entry_signals_raw(
             current_row=curr_row, prev_row=prev_row,
-            current_high=98.0,
+            current_low=102.0,
         )
         assert result > 0
         assert 1 <= result <= 8
 
-    def test_no_signal_when_high_stays_below_band(self):
-        """If price never reached the band (prev_high < band), no signal."""
-        # band = 100, prev_high = 95 (band > high always) → crossover condition fails
-        prev_row, curr_row = self._make_rows(band_val=100.0, prev_high=95.0, curr_high=100.0)
+    def test_no_signal_when_low_stays_below_band(self):
+        """If low never bounces above the band (still in discount zone), no signal."""
+        # band=100, prev_low=95 (≤ band), curr_low=98 (still ≤ band) → no crossover
+        prev_row, curr_row = self._make_rows(band_val=100.0, prev_low=95.0)
         result = compute_entry_signals_raw(
             current_row=curr_row, prev_row=prev_row,
-            current_high=90.0,
+            current_low=98.0,
         )
         assert result == 0
 
     def test_returns_highest_band_number(self):
-        """Should return an int in range 0–8."""
-        prev_row = pd.Series({f"premium_{k}": 100.0 + k for k in range(1, 9)},
-                             dtype=float)
-        prev_row["high"] = 112.0   # above band_8 (100+8=108)
-        curr_row = pd.Series({f"premium_{k}": 100.0 + k for k in range(1, 9)},
-                             dtype=float)
-        curr_row["high"] = float("nan")
+        """Should return an int in range 0–8 (highest triggered band wins)."""
+        # discount bands 1..8 = 92..99; prev_low=90 (below all), curr_low=105 (above all)
+        prev_row = pd.Series(
+            {f"discount_{k}": 90.0 + k for k in range(1, 9)}, dtype=float
+        )
+        prev_row["low"] = 88.0   # below band_1 (91)
+        curr_row = pd.Series(
+            {f"discount_{k}": 90.0 + k for k in range(1, 9)}, dtype=float
+        )
+        curr_row["low"] = float("nan")
         result = compute_entry_signals_raw(
             current_row=curr_row, prev_row=prev_row,
-            current_high=95.0,
+            current_low=105.0,   # above band_8 (98) → band 8 fires
         )
         assert isinstance(result, int)
         assert 0 <= result <= 8
@@ -165,37 +168,36 @@ class TestComputeEntrySignalsRaw:
 
 class TestResolveEntrySignals:
     def test_adx_blocks_when_trending(self):
-        """ADX >= 25 should block signal regardless of RSI."""
+        """ADX >= 25 should block LONG signal regardless of RSI."""
         raw = 3  # band 3 fired
-        result = resolve_entry_signals(raw_short=raw, adx=ADX_THRESHOLD, rsi=60.0)
+        result = resolve_entry_signals(raw_long=raw, adx=ADX_THRESHOLD, rsi=40.0)
         assert result == 0
 
     def test_adx_just_below_threshold_passes(self):
-        """ADX < 25 should pass the ADX gate."""
+        """ADX < 25 passes the ADX gate; with low RSI both gates pass."""
         raw = 3
-        result = resolve_entry_signals(raw_short=raw, adx=ADX_THRESHOLD - 0.01, rsi=60.0)
-        # RSI gate (>= 50) also passes — signal should fire
+        result = resolve_entry_signals(raw_long=raw, adx=ADX_THRESHOLD - 0.01, rsi=40.0)
         assert result > 0
 
-    def test_rsi_blocks_when_below_neutral(self):
-        """RSI < 50 should block signal (close not confirming overbought)."""
+    def test_rsi_blocks_when_above_neutral(self):
+        """RSI > 50 should block LONG (close above neutral — not oversold enough)."""
         raw = 3
-        result = resolve_entry_signals(raw_short=raw, adx=20.0, rsi=RSI_NEUTRAL_LO - 0.01)
+        result = resolve_entry_signals(raw_long=raw, adx=20.0, rsi=RSI_NEUTRAL_LO + 0.01)
         assert result == 0
 
     def test_rsi_at_threshold_passes(self):
-        """RSI == 50 (at exact threshold) should pass."""
+        """RSI == 50 (exactly at threshold) should pass (gate is >, not >=)."""
         raw = 3
-        result = resolve_entry_signals(raw_short=raw, adx=20.0, rsi=RSI_NEUTRAL_LO)
+        result = resolve_entry_signals(raw_long=raw, adx=20.0, rsi=RSI_NEUTRAL_LO)
         assert result > 0
 
     def test_both_gates_pass(self):
-        """Both ADX < 25 and RSI >= 50 pass → signal returned unchanged."""
+        """ADX < 25 and RSI <= 50 both pass → signal returned unchanged."""
         raw = 5
-        result = resolve_entry_signals(raw_short=raw, adx=15.0, rsi=55.0)
+        result = resolve_entry_signals(raw_long=raw, adx=15.0, rsi=40.0)
         assert result == raw
 
     def test_no_raw_signal_returns_zero(self):
-        """If raw_short == 0, gates are irrelevant — output is 0."""
-        result = resolve_entry_signals(raw_short=0, adx=10.0, rsi=50.0)
+        """If raw_long == 0, gates are irrelevant — output is 0."""
+        result = resolve_entry_signals(raw_long=0, adx=10.0, rsi=30.0)
         assert result == 0
