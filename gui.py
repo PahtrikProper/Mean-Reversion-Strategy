@@ -1567,16 +1567,25 @@ class App(ctk.CTk):
 
     # ── Chart server ──────────────────────────────────────────────────────────
     def _start_chart_server(self) -> None:
-        """Start the chart server.  Browser opens after the first optimisation completes."""
+        """Start the chart server.  Browser opens after /api/ready returns true."""
         try:
-            from web.server import start as _start_chart, chart_ready_event as _chart_ready
-            import threading as _threading
-            url = f"http://127.0.0.1:{_start_chart()}"
+            from web.server import start as _start_chart
+            import threading as _threading, urllib.request as _ul, json as _json, time as _ti
+            port = _start_chart()
+            url       = f"http://127.0.0.1:{port}"
+            ready_url = f"http://127.0.0.1:{port}/api/ready"
 
             def _open_when_ready():
-                _chart_ready.wait(timeout=900)  # up to 15 min for first optimisation
-                if not _chart_ready.is_set():
-                    return
+                for _ in range(300):    # poll up to ~15 min
+                    try:
+                        with _ul.urlopen(ready_url, timeout=2) as _r:
+                            if _json.loads(_r.read()).get("ready"):
+                                break
+                    except Exception:
+                        pass
+                    _ti.sleep(3)
+                else:
+                    return  # timed out
                 self._open_chart_url(url)
 
             _threading.Thread(target=_open_when_ready, daemon=True,

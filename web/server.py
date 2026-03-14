@@ -5,11 +5,9 @@ Reads directly from data/trading.db (read-only) — never writes.
 Runs in a background daemon thread launched from main.py or gui.py.
 
 Usage:
-    from web.server import start, set_chart_ready
+    from web.server import start
     port = start()          # starts on 127.0.0.1:8765
-    # ... after first optimisation completes ...
-    set_chart_ready()       # signals browser may now open
-    import webbrowser; webbrowser.open(f"http://127.0.0.1:{port}")
+    # Browser opens automatically once /api/ready returns true (DB has data)
 """
 
 import asyncio
@@ -31,17 +29,6 @@ _server_thread: Optional[threading.Thread] = None
 _started        = threading.Event()
 _active_port    = PORT
 
-# ── Chart-ready gate ───────────────────────────────────────────────────────────
-# Set by the trader after the first optimisation + DB seed completes.
-# main.py / gui.py wait on this before opening Firefox.
-chart_ready_event = threading.Event()
-
-
-def set_chart_ready() -> None:
-    """Signal that the first optimisation is done and the chart is populated."""
-    chart_ready_event.set()
-    log.info("Chart ready — browser may open")
-
 
 # ── DB helper ─────────────────────────────────────────────────────────────────
 
@@ -52,6 +39,21 @@ def _get_conn() -> sqlite3.Connection:
     )
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _db_is_ready() -> bool:
+    """Return True when candle_analytics has at least one row (seed complete)."""
+    try:
+        conn = sqlite3.connect(
+            f"file:{DB_PATH}?mode=ro", uri=True, check_same_thread=False
+        )
+        row = conn.execute(
+            "SELECT COUNT(*) FROM candle_analytics"
+        ).fetchone()
+        conn.close()
+        return (row[0] or 0) > 0
+    except Exception:
+        return False
 
 
 # ── FastAPI app factory ────────────────────────────────────────────────────────
@@ -72,10 +74,10 @@ def _make_app():
             headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
         )
 
-    # ── REST: chart-ready flag ─────────────────────────────────────────────────
+    # ── REST: chart-ready flag (DB-driven — no event/import required) ──────────
     @app.get("/api/ready")
     async def ready():
-        return JSONResponse({"ready": chart_ready_event.is_set()})
+        return JSONResponse({"ready": _db_is_ready()})
 
     # ── REST: historical candles + bands ──────────────────────────────────────
     @app.get("/api/history")

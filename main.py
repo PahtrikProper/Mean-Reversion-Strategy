@@ -585,18 +585,29 @@ def main():
     _start_maintenance_thread()
 
     # ── Chart server (background, non-blocking) ────────────────────────────
-    # Server starts immediately; browser opens only after the first
-    # optimisation completes and set_chart_ready() is called.
+    # Server starts immediately; browser opens only after /api/ready returns
+    # true (i.e. candle_analytics has data — first optimisation done).
     try:
-        from web.server import start as _start_chart, chart_ready_event as _chart_ready
+        from web.server import start as _start_chart
+        import urllib.request as _urllib_req
         _chart_port = _start_chart()
         _chart_url  = f"http://127.0.0.1:{_chart_port}"
         print(f"  Chart server ready → {_chart_url}  (browser opens after first optimisation)")
 
         def _open_browser_when_ready():
-            _chart_ready.wait(timeout=900)  # up to 15 min for first optimisation
-            if not _chart_ready.is_set():
-                return
+            import time as _time
+            _ready_url = f"http://127.0.0.1:{_chart_port}/api/ready"
+            for _ in range(300):   # poll up to ~15 min (300 × 3 s)
+                try:
+                    with _urllib_req.urlopen(_ready_url, timeout=2) as _r:
+                        import json as _json
+                        if _json.loads(_r.read()).get("ready"):
+                            break
+                except Exception:
+                    pass
+                _time.sleep(3)
+            else:
+                return  # timed out
             try:
                 import subprocess
                 if sys.platform == "darwin":

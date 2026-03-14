@@ -714,12 +714,6 @@ class PaperTrader:
                     )
                 except Exception as _bt_err:
                     log.warning(f"[PAPER] bulk_log_backtest_trades failed: {_bt_err}")
-                # Signal chart is ready for the first optimisation
-                try:
-                    from web.server import set_chart_ready
-                    set_chart_ready()
-                except Exception:
-                    pass
                 log.info(
                     f"[PAPER][REOPT] {'switched + ' if _switched else ''}params updated "
                     f"(MC={new_mc_score:.4f})"
