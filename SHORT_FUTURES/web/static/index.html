@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Mean Reversion Trader — Chart</title>
+  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+  <style>
+    /* ── Reset / base ───────────────────────────────────────────────────── */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #131722;
+      color: #d1d4dc;
+      font-family: -apple-system, BlinkMacSystemFont, 'Trebuchet MS', 'Segoe UI', sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Top bar ────────────────────────────────────────────────────────── */
+    #topbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 16px;
+      height: 44px;
+      background: #1e2130;
+      border-bottom: 1px solid #2a2e39;
+      flex-shrink: 0;
+      user-select: none;
+    }
+
+    #topbar .logo {
+      font-size: 13px;
+      font-weight: 700;
+      color: #5470c6;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+
+    #topbar .sep {
+      width: 1px;
+      height: 20px;
+      background: #2a2e39;
+    }
+
+    .tv-select {
+      appearance: none;
+      background: #2a2e39;
+      color: #d1d4dc;
+      border: 1px solid #363a45;
+      border-radius: 4px;
+      padding: 4px 24px 4px 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      outline: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23787b86'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 7px center;
+    }
+    .tv-select:hover { border-color: #5470c6; }
+    .tv-select:focus { border-color: #5470c6; }
+
+    /* ── Legend overlay ─────────────────────────────────────────────────── */
+    #legend {
+      position: absolute;
+      top: 52px;
+      left: 12px;
+      z-index: 10;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: #787b86;
+      opacity: 0.85;
+    }
+
+    .legend-swatch {
+      width: 12px;
+      height: 2px;
+      border-radius: 1px;
+      flex-shrink: 0;
+    }
+
+    /* ── Status indicator ───────────────────────────────────────────────── */
+    #status-wrap {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12px;
+      color: #787b86;
+    }
+
+    #status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #787b86;
+      transition: background 0.3s;
+    }
+    #status-dot.connected    { background: #26a69a; }
+    #status-dot.disconnected { background: #ef5350; }
+
+    /* ── Chart area ─────────────────────────────────────────────────────── */
+    #charts-wrap {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      position: relative;
+    }
+
+    #chart-main {
+      flex: 1;
+      min-height: 0;
+    }
+
+    #chart-vol {
+      height: 110px;
+      flex-shrink: 0;
+      border-top: 1px solid #1e2130;
+    }
+
+    /* ── Loading overlay ────────────────────────────────────────────────── */
+    #loading {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      background: #131722ee;
+      z-index: 20;
+      transition: opacity 0.4s;
+    }
+    #loading.hidden { opacity: 0; pointer-events: none; }
+
+    #loading-spinner {
+      width: 28px;
+      height: 28px;
+      border: 3px solid #2a2e39;
+      border-top-color: #5470c6;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #loading-msg {
+      font-size: 13px;
+      color: #787b86;
+      text-align: center;
+    }
+
+    /* ── Info bar (OHLCV on hover) ──────────────────────────────────────── */
+    #info-bar {
+      position: absolute;
+      top: 52px;
+      right: 80px;
+      z-index: 10;
+      pointer-events: none;
+      font-size: 11px;
+      color: #d1d4dc;
+      display: flex;
+      gap: 10px;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+    #info-bar.visible { opacity: 1; }
+    #info-bar span { color: #787b86; }
+    #info-bar .up   { color: #26a69a; }
+    #info-bar .dn   { color: #ef5350; }
+  </style>
+</head>
+<body>
+
+<!-- ── Top bar ─────────────────────────────────────────────────────────────── -->
+<div id="topbar">
+  <div class="logo">⬛ MRT</div>
+  <div class="sep"></div>
+  <select class="tv-select" id="sel-symbol"></select>
+  <div class="tv-select" style="cursor:default;">15m</div>
+  <div class="sep"></div>
+  <div id="status-wrap">
+    <div id="status-dot"></div>
+    <span id="status-txt">Connecting…</span>
+  </div>
+</div>
+
+<!-- ── Charts ──────────────────────────────────────────────────────────────── -->
+<div id="charts-wrap">
+  <div id="chart-main"></div>
+  <div id="chart-vol"></div>
+
+  <!-- OHLCV info bar (shown on crosshair hover) -->
+  <div id="info-bar">
+    <span>O</span><b id="ib-o">—</b>
+    <span>H</span><b id="ib-h">—</b>
+    <span>L</span><b id="ib-l">—</b>
+    <span>C</span><b id="ib-c">—</b>
+    <span>V</span><b id="ib-v">—</b>
+  </div>
+
+  <!-- Band legend -->
+  <div id="legend">
+    <div class="legend-item">
+      <div class="legend-swatch" style="background:#ef5350;"></div>
+      <span>Premium bands (entry)</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-swatch" style="background:#5470c6;"></div>
+      <span>MA (centre)</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-swatch" style="background:#26a69a;"></div>
+      <span>Discount bands (exit)</span>
+    </div>
+    <div class="legend-item" style="margin-top:4px;">
+      <div style="width:8px;height:8px;border-radius:50%;background:#ef5350;flex-shrink:0;"></div>
+      <span>Live/paper SHORT entry</span>
+    </div>
+    <div class="legend-item">
+      <div style="width:8px;height:8px;border-radius:50%;background:#26a69a;flex-shrink:0;"></div>
+      <span>Live/paper exit</span>
+    </div>
+    <div class="legend-item">
+      <div style="width:6px;height:6px;border-radius:50%;background:#8888aa;flex-shrink:0;margin:1px;"></div>
+      <span>Backtest trade</span>
+    </div>
+  </div>
+
+  <!-- Loading / waiting overlay -->
+  <div id="loading">
+    <div id="loading-spinner"></div>
+    <div id="loading-msg">Waiting for first optimisation…</div>
+  </div>
+</div>
+
+<script>
+// ── Constants ──────────────────────────────────────────────────────────────────
+const BASE = window.location.origin;
+const WS   = `ws://${window.location.host}/ws`;
+
+const CHART_OPTS = {
+  layout: {
+    background:  { color: '#131722' },
+    textColor:   '#d1d4dc',
+    fontSize:    11,
+  },
+  grid: {
+    vertLines: { color: '#1e2130' },
+    horzLines: { color: '#1e2130' },
+  },
+  crosshair: {
+    mode:      LightweightCharts.CrosshairMode.Normal,
+    vertLine:  { color: '#787b8680', labelBackgroundColor: '#2a2e39' },
+    horzLine:  { color: '#787b8680', labelBackgroundColor: '#2a2e39' },
+  },
+  rightPriceScale: {
+    borderColor: '#2a2e39',
+    scaleMargins: { top: 0.1, bottom: 0.1 },
+  },
+  timeScale: {
+    borderColor:      '#2a2e39',
+    timeVisible:      true,
+    secondsVisible:   false,
+    rightOffset:      8,
+    barSpacing:       8,
+    fixLeftEdge:      false,
+    fixRightEdge:     false,
+  },
+  handleScroll:   true,
+  handleScale:    true,
+};
+
+// ── Create charts ──────────────────────────────────────────────────────────────
+const mainEl = document.getElementById('chart-main');
+const volEl  = document.getElementById('chart-vol');
+
+const mainChart = LightweightCharts.createChart(mainEl, {
+  ...CHART_OPTS,
+  width:  mainEl.clientWidth,
+  height: mainEl.clientHeight,
+});
+
+const volChart = LightweightCharts.createChart(volEl, {
+  ...CHART_OPTS,
+  width:  volEl.clientWidth,
+  height: volEl.clientHeight,
+  leftPriceScale:  { visible: false },
+  rightPriceScale: {
+    borderColor:   '#2a2e39',
+    scaleMargins:  { top: 0.05, bottom: 0 },
+    drawTicks:     false,
+  },
+  timeScale: {
+    ...CHART_OPTS.timeScale,
+    timeVisible:   true,
+    secondsVisible: false,
+    borderColor:   '#2a2e39',
+  },
+});
+
+// ── Candle series ──────────────────────────────────────────────────────────────
+const candleSeries = mainChart.addCandlestickSeries({
+  upColor:         '#26a69a',
+  downColor:       '#ef5350',
+  borderUpColor:   '#26a69a',
+  borderDownColor: '#ef5350',
+  wickUpColor:     '#26a69a',
+  wickDownColor:   '#ef5350',
+});
+
+// ── MA (centre line) ───────────────────────────────────────────────────────────
+const maSeries = mainChart.addLineSeries({
+  color:             '#5470c6',
+  lineWidth:         1,
+  priceLineVisible:  false,
+  lastValueVisible:  false,
+  crosshairMarkerVisible: false,
+});
+
+// ── Premium bands 1–8 (red, fades outward) ────────────────────────────────────
+const PREM_COLORS = [
+  '#ef535099', '#ef535070', '#ef535050', '#ef535038',
+  '#ef535028', '#ef535018', '#ef535010', '#ef535008',
+];
+const premSeries = PREM_COLORS.map((c, i) =>
+  mainChart.addLineSeries({
+    color:                  c,
+    lineWidth:              i === 0 ? 1 : 1,
+    lineStyle:              i === 0
+      ? LightweightCharts.LineStyle.Solid
+      : LightweightCharts.LineStyle.Dotted,
+    priceLineVisible:       false,
+    lastValueVisible:       false,
+    crosshairMarkerVisible: false,
+  })
+);
+
+// ── Discount bands 1–8 (green, fades outward) ─────────────────────────────────
+const DISC_COLORS = [
+  '#26a69a99', '#26a69a70', '#26a69a50', '#26a69a38',
+  '#26a69a28', '#26a69a18', '#26a69a10', '#26a69a08',
+];
+const discSeries = DISC_COLORS.map((c, i) =>
+  mainChart.addLineSeries({
+    color:                  c,
+    lineWidth:              1,
+    lineStyle:              i === 0
+      ? LightweightCharts.LineStyle.Solid
+      : LightweightCharts.LineStyle.Dotted,
+    priceLineVisible:       false,
+    lastValueVisible:       false,
+    crosshairMarkerVisible: false,
+  })
+);
+
+// ── Volume ─────────────────────────────────────────────────────────────────────
+const volSeries = volChart.addHistogramSeries({
+  priceFormat:    { type: 'volume' },
+  priceScaleId:   'right',
+});
+
+// ── Sync time scales between main and volume charts ───────────────────────────
+let _syncingMain = false, _syncingVol = false;
+mainChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+  if (_syncingVol || !range) return;
+  _syncingMain = true;
+  volChart.timeScale().setVisibleLogicalRange(range);
+  _syncingMain = false;
+});
+volChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+  if (_syncingMain || !range) return;
+  _syncingVol = true;
+  mainChart.timeScale().setVisibleLogicalRange(range);
+  _syncingVol = false;
+});
+
+// ── Crosshair — OHLCV info bar ─────────────────────────────────────────────────
+const infoBar = document.getElementById('info-bar');
+mainChart.subscribeCrosshairMove(param => {
+  if (!param || !param.time) { infoBar.classList.remove('visible'); return; }
+  const c = param.seriesData.get(candleSeries);
+  if (!c) return;
+  const isUp = c.close >= c.open;
+  document.getElementById('ib-o').textContent = c.open.toFixed(4);
+  document.getElementById('ib-h').textContent = c.high.toFixed(4);
+  document.getElementById('ib-l').textContent = c.low.toFixed(4);
+  const ib_c = document.getElementById('ib-c');
+  ib_c.textContent = c.close.toFixed(4);
+  ib_c.className = isUp ? 'up' : 'dn';
+  const vd = param.seriesData.get(volSeries);
+  if (vd) document.getElementById('ib-v').textContent = fmtVol(vd.value);
+  infoBar.classList.add('visible');
+});
+
+function fmtVol(v) {
+  if (v >= 1e9) return (v/1e9).toFixed(2) + 'B';
+  if (v >= 1e6) return (v/1e6).toFixed(2) + 'M';
+  if (v >= 1e3) return (v/1e3).toFixed(1) + 'K';
+  return v.toFixed(0);
+}
+
+// ── Data helpers ───────────────────────────────────────────────────────────────
+const P_KEYS = ['premium_1','premium_2','premium_3','premium_4','premium_5','premium_6','premium_7','premium_8'];
+const D_KEYS = ['discount_1','discount_2','discount_3','discount_4','discount_5','discount_6','discount_7','discount_8'];
+
+function toSec(ms) { return Math.floor(ms / 1000); }
+
+function applyCandle(c) {
+  const t = toSec(c.time);
+  candleSeries.update({ time: t, open: +c.open, high: +c.high, low: +c.low, close: +c.close });
+  if (c.volume != null)
+    volSeries.update({ time: t, value: +c.volume,
+      color: +c.close >= +c.open ? '#26a69a55' : '#ef535055' });
+  if (c.ma != null) maSeries.update({ time: t, value: +c.ma });
+  P_KEYS.forEach((k, i) => { if (c[k] != null) premSeries[i].update({ time: t, value: +c[k] }); });
+  D_KEYS.forEach((k, i) => { if (c[k] != null) discSeries[i].update({ time: t, value: +c[k] }); });
+}
+
+// ── Trade markers ──────────────────────────────────────────────────────────────
+// Backtest trades: small muted circles (faded grey/blue), no price label
+// Live / paper trades: bright coloured arrows with price + result label
+let _allMarkers = [];
+
+function _tsFromUtc(ts_utc) {
+  return Math.floor(new Date(ts_utc.endsWith('Z') ? ts_utc : ts_utc + 'Z').getTime() / 1000);
+}
+
+function _makeMarker(t) {
+  const isBacktest = (t.mode === 'backtest');
+  const isEntry    = (t.action === 'ENTRY');
+  const price      = t.fill_price != null ? (+t.fill_price).toFixed(4) : '';
+
+  if (isBacktest) {
+    // Muted, small circle markers for backtest trades — show only entry to
+    // avoid clutter; exits are inferred by the paired ENTRY position.
+    return {
+      time:     _tsFromUtc(t.ts_utc),
+      position: isEntry ? 'aboveBar' : 'belowBar',
+      color:    isEntry ? '#9966aa55' : '#448866aa',
+      shape:    'circle',
+      size:     0,        // smallest marker
+      text:     '',       // no label
+    };
+  } else {
+    // Bright, labelled arrows for live / paper fills
+    return {
+      time:     _tsFromUtc(t.ts_utc),
+      position: isEntry ? 'aboveBar' : 'belowBar',
+      color:    isEntry ? '#ef5350'  : '#26a69a',
+      shape:    isEntry ? 'arrowDown' : 'arrowUp',
+      size:     1,
+      text:     isEntry
+        ? `S ${price}`
+        : `X ${price}${t.result ? '  ' + t.result : ''}`,
+    };
+  }
+}
+
+function buildMarkers(trades) {
+  _allMarkers = trades
+    .filter(t => t.fill_price != null)
+    .map(_makeMarker)
+    .sort((a, b) => a.time - b.time);
+  candleSeries.setMarkers(_allMarkers);
+}
+
+function addTradeMarker(t) {
+  if (!t.fill_price) return;
+  const m = _makeMarker(t);
+  _allMarkers.push(m);
+  _allMarkers.sort((a, b) => a.time - b.time);
+  candleSeries.setMarkers(_allMarkers);
+}
+
+// ── Clear all series data ─────────────────────────────────────────────────────
+function clearAll() {
+  candleSeries.setData([]);
+  volSeries.setData([]);
+  maSeries.setData([]);
+  premSeries.forEach(s => s.setData([]));
+  discSeries.forEach(s => s.setData([]));
+  _allMarkers = [];
+  candleSeries.setMarkers([]);
+}
+
+// ── Load history from REST ─────────────────────────────────────────────────────
+let symbol   = 'XRPUSDT';
+let interval = '15';
+
+async function loadHistory() {
+  document.getElementById('loading-msg').textContent = 'Loading chart data…';
+  document.getElementById('loading').classList.remove('hidden');
+  clearAll();
+  try {
+    const [histRes, tradeRes] = await Promise.all([
+      fetch(`${BASE}/api/history?symbol=${symbol}&interval=${interval}&limit=10000`),
+      fetch(`${BASE}/api/trades?symbol=${symbol}&interval=${interval}`),
+    ]);
+    const hist   = await histRes.json();
+    const trades = await tradeRes.json();
+
+    if (!Array.isArray(hist)) { console.error('history error', hist); return; }
+
+    const candles = [], vols = [], mas = [];
+    const prems = P_KEYS.map(() => []);
+    const discs = D_KEYS.map(() => []);
+
+    for (const c of hist) {
+      const t = toSec(c.time);
+      candles.push({ time: t, open: +c.open, high: +c.high, low: +c.low, close: +c.close });
+      if (c.volume != null)
+        vols.push({ time: t, value: +c.volume,
+          color: +c.close >= +c.open ? '#26a69a55' : '#ef535055' });
+      if (c.ma != null) mas.push({ time: t, value: +c.ma });
+      P_KEYS.forEach((k, i) => { if (c[k] != null) prems[i].push({ time: t, value: +c[k] }); });
+      D_KEYS.forEach((k, i) => { if (c[k] != null) discs[i].push({ time: t, value: +c[k] }); });
+    }
+
+    candleSeries.setData(candles);
+    volSeries.setData(vols);
+    maSeries.setData(mas);
+    premSeries.forEach((s, i) => s.setData(prems[i]));
+    discSeries.forEach((s, i) => s.setData(discs[i]));
+
+    if (Array.isArray(trades)) buildMarkers(trades);
+
+    mainChart.timeScale().fitContent();
+
+  } catch (e) {
+    console.error('loadHistory error', e);
+  } finally {
+    document.getElementById('loading').classList.add('hidden');
+  }
+}
+
+// ── Load available symbols from REST ──────────────────────────────────────────
+async function loadSymbols() {
+  try {
+    const res  = await fetch(`${BASE}/api/symbols`);
+    const data = await res.json();
+    if (!Array.isArray(data)) return;
+    const sel  = document.getElementById('sel-symbol');
+    sel.innerHTML = '';
+    const seen = new Set();
+    data.forEach(r => {
+      if (!seen.has(r.symbol)) {
+        seen.add(r.symbol);
+        const opt = document.createElement('option');
+        opt.value       = r.symbol;
+        opt.textContent = r.symbol;
+        if (r.symbol === symbol) opt.selected = true;
+        sel.appendChild(opt);
+      }
+    });
+    // If no data yet, show default placeholder
+    if (sel.options.length === 0) {
+      const opt = document.createElement('option');
+      opt.value = 'XRPUSDT'; opt.textContent = 'XRPUSDT'; opt.selected = true;
+      sel.appendChild(opt);
+    }
+  } catch (_) {}
+}
+
+// ── Selectors ─────────────────────────────────────────────────────────────────
+document.getElementById('sel-symbol').addEventListener('change', e => {
+  symbol = e.target.value;
+  loadHistory();
+  reconnect();
+});
+
+// ── WebSocket ──────────────────────────────────────────────────────────────────
+let ws              = null;
+let reconnectTimer  = null;
+let wsActive        = true;
+
+function setStatus(state, msg) {
+  const dot = document.getElementById('status-dot');
+  const txt = document.getElementById('status-txt');
+  dot.className  = state;
+  txt.textContent = msg;
+}
+
+function connect() {
+  if (!wsActive) return;
+  clearTimeout(reconnectTimer);
+  setStatus('', 'Connecting…');
+
+  ws = new WebSocket(`${WS}?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}`);
+
+  ws.onopen = () => {
+    setStatus('connected', `Live  ·  ${symbol}  ${interval}m`);
+  };
+
+  ws.onmessage = ev => {
+    try {
+      const msg = JSON.parse(ev.data);
+      if (msg.type === 'candle') applyCandle(msg.data);
+      if (msg.type === 'trade')  addTradeMarker(msg.data);
+    } catch (_) {}
+  };
+
+  ws.onerror  = () => {};
+  ws.onclose  = () => {
+    if (!wsActive) return;
+    setStatus('disconnected', 'Reconnecting…');
+    reconnectTimer = setTimeout(connect, 3000);
+  };
+}
+
+function reconnect() {
+  if (ws) { try { ws.close(); } catch(_) {} ws = null; }
+  clearTimeout(reconnectTimer);
+  connect();
+}
+
+// ── Resize observer ───────────────────────────────────────────────────────────
+const ro = new ResizeObserver(() => {
+  mainChart.resize(mainEl.clientWidth, mainEl.clientHeight);
+  volChart.resize(volEl.clientWidth, volEl.clientHeight);
+});
+ro.observe(mainEl);
+ro.observe(volEl);
+
+// ── Wait for first optimisation (poll /api/ready) ────────────────────────────
+async function waitForReady() {
+  // Fast path: if the server already says it's ready, proceed immediately
+  try {
+    const r = await fetch(`${BASE}/api/ready`);
+    const d = await r.json();
+    if (d.ready) return;
+  } catch (_) {}
+
+  // Polling loop — check every 3 seconds until ready
+  return new Promise(resolve => {
+    const t = setInterval(async () => {
+      try {
+        const r = await fetch(`${BASE}/api/ready`);
+        const d = await r.json();
+        if (d.ready) { clearInterval(t); resolve(); }
+      } catch (_) {}
+    }, 3000);
+  });
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+(async () => {
+  // Show "waiting" overlay, poll until optimisation done
+  document.getElementById('loading-msg').textContent = 'Waiting for first optimisation…';
+  document.getElementById('loading').classList.remove('hidden');
+
+  await waitForReady();
+
+  await loadSymbols();
+  await loadHistory();
+  connect();
+})();
+</script>
+</body>
+</html>
