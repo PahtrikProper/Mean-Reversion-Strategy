@@ -1,6 +1,6 @@
 # Mean Reversion Strategy — Reference Document
 
-**Version**: 7.0
+**Version**: 8.0
 **Package**: `engine/`
 **Instrument**: Bybit USDT linear perpetuals (configurable)
 **Direction**: SHORT only — no long trades exist or should be added
@@ -91,7 +91,17 @@ resolve_entry_signals(raw_short, adx, rsi) -> int
 | 3 | **Stop-Loss** | high >= entry * (1 + sl_pct) | Hard stop — wide (default 5%), optimised alongside TP; pre-liquidation guard |
 | 4 | **Band Exit** | discount band crossover-above-low | Mirror of entry signal, on discount bands + low |
 
-**This priority order is fixed.** It is implemented identically in both the backtester (`backtester.py`) and live trader (`live_trader.py`).
+**This priority order is fixed.** It is implemented identically in the backtester (`backtester.py`), paper trader (`paper_trader.py`), and live trader (`live_trader.py`).
+
+### Same-Bar Exit Recalculation ("After order is filled")
+
+After an entry fires on bar N, all four exit conditions are immediately re-evaluated on the **same bar N** before advancing to bar N+1. This matches TradingView's "Recalculate: After order is filled" execution model.
+
+- **Backtester**: full 4-priority pass using bar N's `low_last`, `high_last`, and `mark_high`; `hold_candles = 0` for same-bar exits
+- **Paper trader**: same 4-priority chain re-checked immediately after `_execute_entry()` returns
+- **Live trader**: SL and band exit re-checked immediately after `_execute_entry()` (TP and liquidation are server-side and are picked up via `_handle_external_close` on the next candle)
+
+This behaviour is gated by `entry_candle_idx == i` (backtester) and `self.position is not None` after `_execute_entry` (paper/live).
 
 ### Band Exit Detail
 ```
@@ -262,15 +272,17 @@ Paper trading uses `PaperTrader` (`paper_trader.py`) instead of `LiveRealTrader`
 - No API keys required — uses public REST and WebSocket only
 - Virtual wallet starts at `PAPER_STARTING_BALANCE` (default **$500 USDT**)
 - All four exit types are simulated locally (liquidation, TP, stop-loss, band)
+- Same-bar exit re-check ("After order is filled") implemented — all four exits checked on entry bar
 - Slippage (`SLIPPAGE_TICKS = 1`) applied to all fills via `apply_slippage()` in `orders.py`
 - Taker and maker fees both simulated using per-symbol fee lookups from `helpers.py`
+- After each accepted re-optimisation, backtest trades are written to the `trades` table (`mode='backtest'`) via `bulk_log_backtest_trades()` for chart visualisation
 
 ---
 
 ## Key Invariants — Do Not Change Without Explicit Instruction
 
 1. **SHORT only.** No long entries. No flip logic.
-2. **Exit priority is fixed**: Liquidation → TP → Stop-Loss → Band. This must be identical in `backtester.py` and `live_trader.py`.
+2. **Exit priority is fixed**: Liquidation → TP → Stop-Loss → Band. This must be identical in `backtester.py`, `paper_trader.py`, and `live_trader.py`. The same-bar re-check after entry must preserve the same priority order.
 3. **Hard stop-loss only.** `sl_pct` is optimised alongside `tp_pct`. No trail stop.
 4. **Band EMA length is optimised (2–15).** `band_ema_len` is a search dimension, not a fixed constant.
 5. **ADX threshold (20–28), RSI threshold (40–60), ADX period (7–21), and RSI period (7–21) are all optimised.** Do not treat them as fixed constants.
@@ -303,9 +315,9 @@ Paper trading uses `PaperTrader` (`paper_trader.py`) instead of `LiveRealTrader`
 | `engine/trading/liquidation.py` | Exact Bybit isolated SHORT liquidation price formula |
 | `engine/utils/api_key_prompt.py` | Interactive API credential setup with hidden input; saves/loads `~/.bybit_credentials.json` |
 | `engine/utils/constants.py` | All configuration constants and defaults |
-| `engine/utils/data_structures.py` | `EntryParams`, `ExitParams`, `TradeRecord`, `BacktestResult`, `MCSimResult`, `RealPosition`, `PendingSignal` |
+| `engine/utils/data_structures.py` | `EntryParams`, `ExitParams`, `TradeRecord` (includes `entry_ts_ms`/`exit_ts_ms` for chart marker placement), `BacktestResult`, `MCSimResult`, `RealPosition`, `PendingSignal` |
 | `engine/utils/helpers.py` | Rate limiter, interval parsing, fee/leverage lookups |
-| `engine/utils/db_logger.py` | SQLite WAL singleton logger — all DB writes, `compute_time_tp_pct()`, `run_maintenance()` |
+| `engine/utils/db_logger.py` | SQLite WAL singleton logger — all DB writes, `bulk_log_backtest_trades()` (writes mode='backtest' trade rows after each accepted reopt), `compute_time_tp_pct()`, `run_maintenance()` |
 | `engine/utils/logger.py` | Colour-coded console order logger (`log_order`); `csv_append` / `ensure_csv` are no-ops — all persistence is via SQLite |
 | `engine/utils/plotting.py` | ASCII equity-curve chart (`plot_pnl_chart`) and Monte Carlo terminal report (`print_monte_carlo_report`) |
 | `engine/utils/position_gate.py` | Thread-safe slot gate (MAX_SLOTS=1) |
@@ -316,5 +328,7 @@ Paper trading uses `PaperTrader` (`paper_trader.py`) instead of `LiveRealTrader`
 | `tests/test_orders.py` | Unit tests for slippage application |
 | `tests/test_backtester.py` | Smoke and regression tests for `backtest_once()` |
 | `scripts/run_analysis.py` | Standalone scheduled analysis: multi-interval optimise, ranked report, saves best params to `data/best_params.json` and patches `default_config.json` |
+| `web/server.py` | FastAPI chart server (read-only DB access) — REST endpoints (`/api/history`, `/api/trades`, `/api/symbols`, `/api/ready`) + WebSocket live push; `_db_is_ready()` polls `candle_analytics` row count |
+| `web/static/index.html` | TradingView Lightweight Charts frontend — candlestick, MA+bands overlay, live/paper/backtest trade markers, loading overlay, symbol switcher |
 | `.claude/agents/market-analyst.md` | Claude agent: runs optimisation, signal scan, param warm-start, saves results |
 | `.claude/agents/trade-analyst.md` | Claude agent: queries `data/trading.db` for trades, signals, events, diagnostics |

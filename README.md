@@ -1,11 +1,11 @@
 # Mean Reversion Trader
 
-An automated SHORT-only mean-reversion trading bot for Bybit USDT linear perpetuals. Fades overextended price moves using EMA-smoothed premium bands, with an integrated parameter optimiser that re-tunes itself every 8 hours.
+An automated SHORT-only mean-reversion trading bot for Bybit USDT linear perpetuals. Fades overextended price moves using EMA-smoothed premium bands, with an integrated parameter optimiser that re-tunes itself every 12 hours.
 
 Symbols, leverage, intervals, and all strategy parameters are fully configurable — either through the GUI settings panel, a JSON config file, or `engine/utils/constants.py`.
 
 All trade data, optimisation runs, signals, events, and diagnostics are written to a single SQLite database (`data/trading.db`). No CSV or log files are used.
-<img width="966" height="840" alt="Screenshot 2026-03-05 at 9 25 55 PM" src="https://github.com/user-attachments/assets/97fda080-b9a0-4ddc-af59-9377b9c57a8f" />
+<img width="966" height="840" alt="Screenshot 2026-03-05 at 9 25 55 PM" src="https://github.com/user-attachments/assets/97fda080-b9a0-4ddc-af59-9377b9c57a8f" />
 
 ---
 
@@ -34,6 +34,8 @@ pip install -r requirements.txt
 | `tqdm` | Progress bar during optimisation |
 | `customtkinter` | GUI (not needed if running CLI only) |
 | `colorama` | ANSI colour output on Windows (optional on macOS/Linux) |
+| `fastapi` | Chart web server (served on `127.0.0.1:8765`) |
+| `uvicorn` | ASGI server for the chart backend |
 
 To build a standalone executable (optional):
 
@@ -63,6 +65,10 @@ Mean Reversion Trader/
 │   └── agents/
 │       ├── market-analyst.md  # Claude agent: multi-interval optimisation
 │       └── trade-analyst.md   # Claude agent: DB/signal diagnostics
+├── web/                     # TradingView Lightweight Charts UI
+│   ├── server.py            # FastAPI server (REST + WebSocket, read-only DB access)
+│   └── static/
+│       └── index.html       # Chart frontend (candlestick + bands + trade markers)
 └── engine/                  # Core package
     ├── core/
     │   ├── indicators.py        # All indicator maths
@@ -216,6 +222,7 @@ python main.py --paper --max-loss 3
 5. Rank all pairs by score: `PnL% / (1 + max_drawdown%)`; launch the top-ranked trader per symbol
 6. Connect to Bybit WebSocket and begin live trading
 7. `TradingStatusMonitor` prints a full status table every 3 minutes
+8. Browser opens automatically to the chart UI once `candle_analytics` has data (first optimisation complete)
 
 ### Paper trading startup sequence
 
@@ -226,6 +233,36 @@ python main.py --paper --max-loss 3
 5. Connect to Bybit public WebSocket for live candle data
 6. Simulate fills, PnL, fees, slippage, and liquidation using the exact Bybit formula
 7. Virtual starting wallet: **$500 USDT** per symbol
+
+---
+
+## Live Chart UI
+
+A TradingView Lightweight Charts candlestick chart is served at `http://127.0.0.1:8765` and opens automatically in the browser once the first optimisation completes and candle analytics data is available in the DB.
+
+The chart is read-only — it never writes to the database.
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| Candlestick chart | 10 000 candles of OHLCV history with live WebSocket updates |
+| MA + 8 premium/discount bands | RMA centre line and all 8 premium (entry) and discount (exit) bands overlaid |
+| Live/paper trade markers | Entry → red ▼ arrow; exit → green ▲ arrow. Label shows fill price and result |
+| Backtest trade markers | Semi-transparent circles at entry/exit timestamps from the most recent accepted optimisation run |
+| Loading overlay | Shows "Waiting for first optimisation…" until `candle_analytics` has data; auto-dismisses |
+| Symbol + interval switcher | Dropdown to switch between any (symbol, interval) pair in the DB |
+| Legend | Colour-coded band and marker legend in the top-left corner |
+
+### API endpoints (read-only)
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/ready` | Returns `{"ready": true}` once `candle_analytics` has at least one row |
+| `GET /api/history?symbol=XRPUSDT&interval=15&limit=10000` | Historical OHLCV + band data |
+| `GET /api/trades?symbol=XRPUSDT&interval=15` | Last 500 trades (all modes) |
+| `GET /api/symbols` | All (symbol, interval) pairs present in the DB |
+| `WS /ws?symbol=XRPUSDT&interval=15` | Live candle and trade push (excludes backtest trades) |
 
 ---
 
@@ -303,6 +340,16 @@ The bot enters short when price touches a premium band above the RMA centre line
 
 In **live** mode, TP and liquidation are handled server-side by Bybit; stop-loss and band exits are checked on every closed candle. In **paper** mode, all four exits are simulated locally using the exact Bybit liquidation formula with the user-selected leverage. Slippage (1 tick) is applied to all simulated fills.
 
+### TradingView Execution Model
+
+The bot uses the same execution model as TradingView's strategy tester with these settings enabled:
+
+- **Fill orders: On bar close** — entry and exit fills use the closing price (with slippage)
+- **On every tick** — intrabar high/low are used for TP, SL, and liquidation checks
+- **Recalculate: After order is filled** — after an entry fires on bar N, all four exit conditions are immediately re-evaluated on the same bar N before advancing to bar N+1
+
+The "after order is filled" same-bar re-check is implemented identically in the backtester, paper trader, and live trader.
+
 The optimiser searches **12 parameters** — entry MA length, entry band multiplier, ADX threshold, RSI threshold, band EMA length, ADX period, RSI period, exit MA length, exit band multiplier, TP %, SL %, and leverage — and re-runs every **12 hours** in a background thread so live candle processing is never blocked. Each trial uses a random 5–30-day slice of the 30-day seeded dataset to prevent window overfitting. A volume filter (5% of candle USDT volume) vetoes entries on thin candles. All (symbol, interval) pairs are ranked by `score = PnL% / (1 + max_drawdown%)` and the top-ranked pair per symbol is selected for trading.
 
 See **`STRATEGY.md`** for the complete specification including exact formulas and all invariants.
@@ -363,7 +410,7 @@ All data is written to a single SQLite database — no CSV or log files are crea
 
 | Table | Retention | Contents |
 |-------|-----------|---------|
-| `trades` | 365 days | Every entry and exit: fill price, PnL, fees, slippage, exit reason |
+| `trades` | 365 days | Every entry and exit: fill price, PnL, fees, slippage, exit reason. Mode column distinguishes `live`, `paper`, and `backtest` rows |
 | `orders` | 90 days | Raw order placement log with side, qty, price, status |
 | `params` | 365 days | Parameter set in use after each optimisation run |
 | `signals` | 30 days | Every entry signal: raw band level, final level, blocked_by reason |
@@ -376,6 +423,8 @@ All data is written to a single SQLite database — no CSV or log files are crea
 | `monte_carlo_runs` | 365 days | Monte Carlo simulation results |
 | `balance_snapshots` | 90 days | Periodic wallet balance snapshots |
 | `mark_price_ticks` | 3 days | High-frequency mark-price ticks for liquidation monitoring |
+
+**Backtest trade rows** (`mode = 'backtest'`) are written to the `trades` table after every accepted re-optimisation. They include millisecond timestamps (`entry_ts_ms`, `exit_ts_ms`) so the chart can place markers at the correct candle. Old backtest rows for a symbol/interval are replaced on each accepted reopt.
 
 DB maintenance (pruning, WAL checkpoint, ANALYZE, VACUUM) runs automatically in a background thread at startup and every 24 hours.
 
