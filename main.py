@@ -527,7 +527,7 @@ def _validate_config() -> None:
         if not re.match(r"^\w{3,20}USDT$", s, re.IGNORECASE):
             errors.append(f"  symbol '{s}' looks invalid (expected format: XRPUSDT)")
 
-    valid_ivs = {"1", "3", "5", "15", "30", "60"}
+    valid_ivs = {"15"}
     for iv in const_module.CANDLE_INTERVALS:
         if str(iv) not in valid_ivs:
             errors.append(f"  interval '{iv}' not in Bybit set {sorted(valid_ivs, key=int)}")

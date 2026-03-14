@@ -98,7 +98,7 @@ def _apply_config(cfg: dict) -> None:
         xc = cfg["exit"]
         if "tp_pct"       in xc: C.DEFAULT_TP_PCT       = float(xc["tp_pct"])
     if "days_back_seed"   in cfg: C.DAYS_BACK_SEED      = int(cfg["days_back_seed"])
-    if "candle_intervals" in cfg: C.CANDLE_INTERVALS     = [str(v) for v in cfg["candle_intervals"]]
+    C.CANDLE_INTERVALS = ["15"]   # fixed — 15m only
     if "risk_pct"         in cfg: C.MAX_SYMBOL_FRACTION  = float(cfg["risk_pct"])
     if "optimizer" in cfg:
         if "n_trials" in cfg["optimizer"]:
@@ -989,34 +989,10 @@ class App(ctk.CTk):
             self._risk_body, text="Intervals:",
             font=ctk.CTkFont(size=13), text_color="#c9d1d9",
         ).grid(row=3, column=0, padx=(14, 8), pady=(0, 12), sticky="w")
-
-        iv_frame = ctk.CTkFrame(self._risk_body, fg_color="transparent")
-        iv_frame.grid(row=3, column=1, columnspan=2, sticky="w", pady=(0, 12))
-
-        self._iv_vars: dict = {}
-        self._iv_checks: list = []
-        for _lbl, _val in [("1m","1"),("3m","3"),("5m","5"),("15m","15"),("30m","30"),("60m","60")]:
-            _var = ctk.BooleanVar(value=(_val in C.CANDLE_INTERVALS))
-            self._iv_vars[_val] = _var
-            _cb = ctk.CTkCheckBox(
-                iv_frame, text=_lbl, variable=_var, width=65,
-                font=ctk.CTkFont(size=13),
-            )
-            _cb.pack(side="left", padx=(0, 4))
-            self._iv_checks.append(_cb)
-
-        self._btn_apply_intervals = ctk.CTkButton(
-            iv_frame, text="Apply", width=80,
-            command=self._apply_intervals,
-        )
-        self._btn_apply_intervals.pack(side="left", padx=(8, 0))
-
-        self._lbl_intervals_status = ctk.CTkLabel(
-            self._risk_body,
-            text=f"Current: {', '.join(iv + 'm' for iv in C.CANDLE_INTERVALS)}",
-            text_color="#8b949e", font=ctk.CTkFont(size=12),
-        )
-        self._lbl_intervals_status.grid(row=3, column=3, padx=14, pady=(0, 12), sticky="w")
+        ctk.CTkLabel(
+            self._risk_body, text="15m  (fixed)",
+            font=ctk.CTkFont(size=13), text_color="#8b949e",
+        ).grid(row=3, column=1, padx=(0, 8), pady=(0, 12), sticky="w")
 
         # ── Take Profit row ───────────────────────────────────────────────────
         ctk.CTkLabel(
@@ -1509,18 +1485,6 @@ class App(ctk.CTk):
             text_color="#3fb950",
         )
 
-    def _apply_intervals(self) -> None:
-        selected = sorted(
-            [v for v, var in self._iv_vars.items() if var.get()],
-            key=lambda x: int(x),
-        )
-        if selected:
-            C.CANDLE_INTERVALS = selected
-            _save_config({"candle_intervals": selected})
-            self._lbl_intervals_status.configure(
-                text=f"Current: {', '.join(iv + 'm' for iv in selected)}",
-                text_color="#3fb950",
-            )
 
     def _apply_tp(self) -> None:
         raw = self._tp_var.get().replace("%", "").strip()
@@ -1583,9 +1547,6 @@ class App(ctk.CTk):
         self._btn_apply_days.configure(state="disabled")
         self._tests_menu.configure(state="disabled")
         self._btn_apply_tests.configure(state="disabled")
-        for _cb in self._iv_checks:
-            _cb.configure(state="disabled")
-        self._btn_apply_intervals.configure(state="disabled")
         self._prog_outer.grid()
         self._prog_bar.set(0)
 
@@ -1731,9 +1692,6 @@ class App(ctk.CTk):
             self._btn_apply_days.configure(state="normal")
             self._tests_menu.configure(state="normal")
             self._btn_apply_tests.configure(state="normal")
-            for _cb in self._iv_checks:
-                _cb.configure(state="normal")
-            self._btn_apply_intervals.configure(state="normal")
             self._set_status("idle")
             self._lbl_ctrl_msg.configure(text="Ready to start")
             self._prog_outer.grid_remove()
