@@ -294,6 +294,106 @@ def backtest_once(
                     entry_ts_ms_bt   = int(_ts_raw.value) // 1_000_000 if hasattr(_ts_raw, "value") else int(_ts_raw)
                     time_tp_applied      = False
 
+        # ── Same-bar exit — "Recalculate: After order is filled" (TradingView) ──
+        # After entry fills on bar N, immediately re-check all exit conditions
+        # on the same bar before advancing to bar N+1.
+        if in_position and entry_candle_idx == i and not exited:
+            qty_abs_sb = abs(pos_qty)
+            tier_sb    = pick_risk_tier(risk_df, qty_abs_sb * mark_close)
+            # 1. Liquidation (same-bar mark high)
+            liq_sb = liquidation_price_short_isolated(
+                entry_price_bt, pos_qty, leverage, mark_close, tier_sb, fee_rate
+            )
+            if mark_high >= liq_sb:
+                pnl_gross = (entry_price_bt - liq_sb) * qty_abs_sb
+                exit_fee  = (qty_abs_sb * liq_sb) * fee_rate
+                wallet   += pnl_gross - exit_fee
+                wallet    = max(0.0, wallet)
+                pnl_net   = pnl_gross - entry_fee - exit_fee
+                trade_pnls.append(pnl_net)
+                _exit_ts_raw = dfl.iloc[i]["ts"]
+                _exit_ts_ms  = int(_exit_ts_raw.value) // 1_000_000 if hasattr(_exit_ts_raw, "value") else int(_exit_ts_raw)
+                trade_records.append(TradeRecord(
+                    side="SHORT", entry_price=entry_price_bt, exit_price=liq_sb,
+                    qty=qty_abs_sb, entry_fee=entry_fee, exit_fee=exit_fee,
+                    pnl_gross=pnl_gross, pnl_net=pnl_net,
+                    reason="LIQUIDATION", wallet_at_entry=wallet_at_entry,
+                    hold_candles=0, entry_ts_ms=entry_ts_ms_bt, exit_ts_ms=_exit_ts_ms,
+                ))
+                wallet_history.append(wallet)
+                liquidated = True
+                break
+            # 2. Take-profit (same-bar low)
+            _sb_tp_price = entry_price_bt * (1.0 - float(exit_params.tp_pct))
+            if low_last <= _sb_tp_price:
+                fill      = apply_slippage(_sb_tp_price, "buy")
+                pnl_gross = (entry_price_bt - fill) * qty_abs_sb
+                exit_fee  = (qty_abs_sb * fill) * fee_rate
+                wallet   += pnl_gross - exit_fee
+                pnl_net   = pnl_gross - entry_fee - exit_fee
+                trade_pnls.append(pnl_net)
+                _exit_ts_raw = dfl.iloc[i]["ts"]
+                _exit_ts_ms  = int(_exit_ts_raw.value) // 1_000_000 if hasattr(_exit_ts_raw, "value") else int(_exit_ts_raw)
+                trade_records.append(TradeRecord(
+                    side="SHORT", entry_price=entry_price_bt, exit_price=fill,
+                    qty=qty_abs_sb, entry_fee=entry_fee, exit_fee=exit_fee,
+                    pnl_gross=pnl_gross, pnl_net=pnl_net,
+                    reason="TP", wallet_at_entry=wallet_at_entry,
+                    hold_candles=0, entry_ts_ms=entry_ts_ms_bt, exit_ts_ms=_exit_ts_ms,
+                ))
+                pos_qty = 0.0; entry_price_bt = 0.0; entry_fee = 0.0
+                wallet_at_entry = 0.0; in_position = False
+                entry_candle_idx = 0; time_tp_applied = False
+                exited = True
+            # 3. Stop-loss (same-bar high)
+            if not exited and pos_qty != 0.0:
+                sl_price_sb = entry_price_bt * (1.0 + float(exit_params.sl_pct))
+                if high_last >= sl_price_sb:
+                    fill      = apply_slippage(close, "buy")
+                    pnl_gross = (entry_price_bt - fill) * qty_abs_sb
+                    exit_fee  = (qty_abs_sb * fill) * fee_rate
+                    wallet   += pnl_gross - exit_fee
+                    pnl_net   = pnl_gross - entry_fee - exit_fee
+                    trade_pnls.append(pnl_net)
+                    _exit_ts_raw = dfl.iloc[i]["ts"]
+                    _exit_ts_ms  = int(_exit_ts_raw.value) // 1_000_000 if hasattr(_exit_ts_raw, "value") else int(_exit_ts_raw)
+                    trade_records.append(TradeRecord(
+                        side="SHORT", entry_price=entry_price_bt, exit_price=fill,
+                        qty=qty_abs_sb, entry_fee=entry_fee, exit_fee=exit_fee,
+                        pnl_gross=pnl_gross, pnl_net=pnl_net,
+                        reason="STOP_LOSS", wallet_at_entry=wallet_at_entry,
+                        hold_candles=0, entry_ts_ms=entry_ts_ms_bt, exit_ts_ms=_exit_ts_ms,
+                    ))
+                    pos_qty = 0.0; entry_price_bt = 0.0; entry_fee = 0.0
+                    wallet_at_entry = 0.0; in_position = False
+                    entry_candle_idx = 0; time_tp_applied = False
+                    exited = True
+            # 4. Band exit (same-bar signal)
+            if not exited and pos_qty != 0.0:
+                _raw_exit_sb = compute_exit_signals_raw(
+                    current_row=row, prev_row=prev, current_low=low_last,
+                )
+                if _raw_exit_sb > 0:
+                    fill      = apply_slippage(close, "buy")
+                    pnl_gross = (entry_price_bt - fill) * qty_abs_sb
+                    exit_fee  = (qty_abs_sb * fill) * fee_rate
+                    wallet   += pnl_gross - exit_fee
+                    pnl_net   = pnl_gross - entry_fee - exit_fee
+                    trade_pnls.append(pnl_net)
+                    _exit_ts_raw = dfl.iloc[i]["ts"]
+                    _exit_ts_ms  = int(_exit_ts_raw.value) // 1_000_000 if hasattr(_exit_ts_raw, "value") else int(_exit_ts_raw)
+                    trade_records.append(TradeRecord(
+                        side="SHORT", entry_price=entry_price_bt, exit_price=fill,
+                        qty=qty_abs_sb, entry_fee=entry_fee, exit_fee=exit_fee,
+                        pnl_gross=pnl_gross, pnl_net=pnl_net,
+                        reason="BAND_EXIT", wallet_at_entry=wallet_at_entry,
+                        hold_candles=0, entry_ts_ms=entry_ts_ms_bt, exit_ts_ms=_exit_ts_ms,
+                    ))
+                    pos_qty = 0.0; entry_price_bt = 0.0; entry_fee = 0.0
+                    wallet_at_entry = 0.0; in_position = False
+                    entry_candle_idx = 0; time_tp_applied = False
+                    exited = True
+
         # ── Equity snapshot ───────────────────────────────────────────────────
         if pos_qty != 0.0:
             wallet_history.append(wallet + (entry_price_bt - close) * abs(pos_qty))

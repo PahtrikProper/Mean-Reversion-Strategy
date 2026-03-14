@@ -1143,6 +1143,74 @@ class PaperTrader:
         if not acted and entry_sig and self.position is None and not self._halted:
             if self.wallet >= MIN_WALLET_USDT:
                 self._execute_entry(c, ts_utc, ts)
+                # ── Same-bar exit — "Recalculate: After order is filled" (TradingView) ──
+                # Re-check all exit conditions on the entry bar immediately after fill.
+                if self.position is not None:
+                    if (self._paper_liq_price is not None
+                            and self.mark_price >= self._paper_liq_price):
+                        qty_abs          = abs(self.position.qty)
+                        liq_price_snap   = self._paper_liq_price
+                        entry_price_snap = self.position.entry_price
+                        margin_snap      = self._paper_margin
+                        entry_fee_snap   = self._paper_entry_fee
+                        tp_snap          = self._paper_tp_price or 0.0
+                        wallet_liq       = self.wallet
+                        pnl_net_liq      = -(margin_snap + entry_fee_snap)
+                        log.info(
+                            f"{COLOR_ERROR}[PAPER][{ts_utc}] LIQUIDATED (same-bar)  "
+                            f"mark={self.mark_price:.5f} >= liq={liq_price_snap:.5f}{COLOR_RESET}"
+                        )
+                        self.trade_count += 1
+                        _db.log_trade(
+                            ts_utc=ts_utc, mode="paper", symbol=self.symbol, interval=self.interval,
+                            action="EXIT", reason="LIQUIDATED",
+                            side="COVER", qty=qty_abs, fill_price=liq_price_snap,
+                            notional=qty_abs * liq_price_snap, fee=0.0,
+                            entry_price=entry_price_snap, tp_price=tp_snap,
+                            mark_price=self.mark_price,
+                            wallet_before=wallet_liq + margin_snap + entry_fee_snap,
+                            wallet_after=wallet_liq,
+                            pnl_gross=-margin_snap, pnl_net=pnl_net_liq,
+                            pnl_1x_usdt=float(pnl_net_liq / float(self.leverage)) if self.leverage else 0.0,
+                            pnl_pct=float(pnl_net_liq / float(self.initial_wallet) * 100.0) if self.initial_wallet > 0 else 0.0,
+                            result="LOSS",
+                            ma_len=self.entry_params.ma_len,
+                            band_mult=float(self.entry_params.band_mult),
+                            tp_pct=float(self.exit_params.tp_pct),
+                        )
+                        _db.log_balance_snapshot(
+                            ts_utc=ts_utc, symbol=self.symbol, event="PAPER_LIQUIDATED",
+                            wallet_usdt=wallet_liq,
+                            session_pnl_usdt=wallet_liq - float(self.initial_wallet),
+                            session_pnl_pct=float((wallet_liq - float(self.initial_wallet)) / float(self.initial_wallet) * 100.0) if self.initial_wallet > 0 else 0.0,
+                        )
+                        _db.log_event(
+                            ts_utc=ts_utc, level="ERROR", event_type="LIQUIDATION",
+                            symbol=self.symbol,
+                            message=f"Position liquidated (same-bar): mark={self.mark_price:.5f} >= liq={liq_price_snap:.5f}",
+                            detail={"entry_price": entry_price_snap, "mark_price": self.mark_price,
+                                    "liq_price": liq_price_snap, "qty": qty_abs,
+                                    "margin_lost": margin_snap + entry_fee_snap,
+                                    "wallet_after": wallet_liq},
+                        )
+                        self.position         = None
+                        self._paper_margin    = 0.0
+                        self._paper_tp_price  = None
+                        self._paper_liq_price = None
+                        self._paper_entry_fee = 0.0
+                        self._entry_time      = None
+                        self._entry_price     = None
+                        self._time_tp_applied = False
+                        self.gate.release(self.symbol)
+                        self._update_account_pnl()
+                    elif (self._paper_tp_price is not None
+                            and l <= self._paper_tp_price):
+                        self._execute_exit(self._paper_tp_price, "TP", ts_utc)
+                    elif (self._entry_price is not None
+                            and h >= self._entry_price * (1.0 + float(self.exit_params.sl_pct))):
+                        self._execute_exit(c, "STOP_LOSS", ts_utc)
+                    elif exit_sig:
+                        self._execute_exit(c, "BAND_EXIT", ts_utc)
             else:
                 log.warning(f"[PAPER][{ts_utc}] Entry signal — wallet {self.wallet:.4f} < {MIN_WALLET_USDT}")
                 # ── Shadow for wallet-blocked signal ─────────────────────

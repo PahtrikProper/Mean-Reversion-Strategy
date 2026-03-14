@@ -1234,6 +1234,14 @@ class LiveRealTrader:
             if not acted and entry_sig and self.position is None and not self._halted:
                 if self.wallet >= MIN_WALLET_USDT:
                     self._execute_entry(c, ts_utc, ts)
+                    # ── Same-bar exit — "Recalculate: After order is filled" (TradingView) ──
+                    # For live trading, TP and liq are server-side; re-check SL and band exit only.
+                    if self.position is not None and self._entry_price is not None:
+                        _sl_sb = self._entry_price * (1.0 + float(self.exit_params.sl_pct))
+                        if h >= _sl_sb:
+                            self._execute_exit(c, "STOP_LOSS", ts_utc)
+                        elif exit_sig:
+                            self._execute_exit(c, "BAND_EXIT", ts_utc)
                 else:
                     log.warning(f"[{ts_utc}] Entry signal — wallet {self.wallet:.4f} < {MIN_WALLET_USDT}")
                     # ── Shadow for wallet-blocked signal ─────────────────────────
