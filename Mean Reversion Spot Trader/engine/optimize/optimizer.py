@@ -61,6 +61,7 @@ from ..utils.constants import (
     OPT_ADX_PERIOD_MIN,         OPT_ADX_PERIOD_MAX,
     OPT_RSI_PERIOD_MIN,         OPT_RSI_PERIOD_MAX,
     OPT_LEVERAGE_MIN,           OPT_LEVERAGE_MAX,
+    OPT_LEVERAGE_VALUES,
     OPT_MIN_DAYS,               OPT_MAX_DAYS,
     OPT_N_RANDOM,
     OPT_MIN_TRADES,
@@ -184,9 +185,8 @@ def optimise_params(
         b_rsi_period = int(np.clip(
             saved_best.get("rsi_period", RSI_PERIOD),
             OPT_RSI_PERIOD_MIN, OPT_RSI_PERIOD_MAX))
-        b_lev        = int(np.clip(
-            round(float(saved_best.get("leverage", DEFAULT_LEVERAGE))),
-            OPT_LEVERAGE_MIN, OPT_LEVERAGE_MAX))
+        _saved_lev   = round(float(saved_best.get("leverage", DEFAULT_LEVERAGE)))
+        b_lev        = min(OPT_LEVERAGE_VALUES, key=lambda v: abs(v - _saved_lev))
 
         attempts = 0
         while len(combos) < n_exploit and attempts < n_exploit * 20:
@@ -229,9 +229,10 @@ def optimise_params(
                 rng.integers(b_rsi_period - EXPLOIT_RSI_PERIOD_RADIUS,
                              b_rsi_period + EXPLOIT_RSI_PERIOD_RADIUS + 1),
                 OPT_RSI_PERIOD_MIN, OPT_RSI_PERIOD_MAX))
-            lev_int    = int(np.clip(
-                rng.integers(b_lev - EXPLOIT_LEVERAGE_RADIUS, b_lev + EXPLOIT_LEVERAGE_RADIUS + 1),
-                OPT_LEVERAGE_MIN, OPT_LEVERAGE_MAX))
+            _b_lev_idx = OPT_LEVERAGE_VALUES.index(b_lev)
+            _lo = max(0, _b_lev_idx - EXPLOIT_LEVERAGE_RADIUS)
+            _hi = min(len(OPT_LEVERAGE_VALUES) - 1, _b_lev_idx + EXPLOIT_LEVERAGE_RADIUS)
+            lev_int    = int(OPT_LEVERAGE_VALUES[int(rng.integers(_lo, _hi + 1))])
             key = (ma, bm_x10, tp_bp, sl_bp, exit_ma, exit_bm_x10,
                    adx_int, rsi_lo_int, band_ema, adx_period, rsi_period, lev_int)
             if key not in seen:
@@ -253,7 +254,7 @@ def optimise_params(
         band_ema    = int(rng.integers(OPT_BAND_EMA_MIN,           OPT_BAND_EMA_MAX           + 1))
         adx_period  = int(rng.integers(OPT_ADX_PERIOD_MIN,         OPT_ADX_PERIOD_MAX         + 1))
         rsi_period  = int(rng.integers(OPT_RSI_PERIOD_MIN,         OPT_RSI_PERIOD_MAX         + 1))
-        lev_int     = int(rng.integers(OPT_LEVERAGE_MIN,           OPT_LEVERAGE_MAX           + 1))
+        lev_int     = int(OPT_LEVERAGE_VALUES[int(rng.integers(0, len(OPT_LEVERAGE_VALUES)))])
         key = (ma, bm_x10, tp_bp, sl_bp, exit_ma, exit_bm_x10,
                adx_int, rsi_lo_int, band_ema, adx_period, rsi_period, lev_int)
         if key not in seen:
@@ -272,7 +273,7 @@ def optimise_params(
               f"SL {OPT_SL_MIN_BP*0.01:.2f}%-{OPT_SL_MAX_BP*0.01:.2f}%")
         print(f"  ExitBand — MA-len {OPT_EXIT_MA_LEN_MIN}-{OPT_EXIT_MA_LEN_MAX}  "
               f"BandMult {OPT_EXIT_BAND_MULT_X10_MIN/10:.1f}-{OPT_EXIT_BAND_MULT_X10_MAX/10:.1f}%")
-        print(f"  Leverage — 1×–1× (spot)")
+        print(f"  Leverage — {OPT_LEVERAGE_VALUES} (spot margin)")
         print(f"  Window   — {OPT_MIN_DAYS} days (fixed)")
         if saved_best:
             print(f"  Mode: {n_exploit} exploitation + {len(combos)-n_exploit} exploration")

@@ -1,7 +1,9 @@
-"""Backtesting Engine — Mean Reversion Strategy (LONG spot only)
+"""Backtesting Engine — Mean Reversion Strategy (LONG spot margin)
 
 Uses LAST-price OHLCV for all signal generation (bands, ADX gate, RSI gate, TP, SL).
-No mark price or liquidation — spot trading has no forced liquidation.
+Spot margin trading: position qty is scaled by leverage; liquidation is checked on
+each candle before other exits.  A liquidated result is flagged so the optimizer
+discards that parameter set.
 
 Entry:
     low bounces back above discount_k band (band crossover)
@@ -31,6 +33,7 @@ from ..utils.constants import (
     TIME_TP_HOURS,
     VOL_FILTER_MAX_PCT,
     MAX_SYMBOL_FRACTION,
+    SPOT_MARGIN_MMR,
 )
 from ..utils.data_structures import TradeRecord, BacktestResult, MCSimResult, EntryParams, ExitParams, MC_SIMS, MC_MIN_TRADES
 from ..core.indicators import (
@@ -55,14 +58,14 @@ def backtest_once(
     time_tp_pct: float = 0.0,
     interval_minutes_bt: int = 5,
 ) -> Optional[BacktestResult]:
-    """Backtest Mean Reversion Strategy (LONG spot).
+    """Backtest Mean Reversion Strategy (LONG spot margin).
 
     Args:
         df_last_raw:         Last-price OHLCV (ts, open, high, low, close, volume)
-        df_mark_raw:         Unused for spot (no liquidation); kept for API compat
-        risk_df:             Unused for spot (no liquidation); kept for API compat
+        df_mark_raw:         Unused; kept for API compat
+        risk_df:             Unused; kept for API compat
         entry_params:        EntryParams — includes adx_period, rsi_period
-        exit_params:         ExitParams  — leverage fixed at 1.0 for spot
+        exit_params:         ExitParams  — leverage in {2,3,4,8,10} for spot margin
         fee_rate:            Taker fee rate (exits)
         maker_fee_rate:      Maker fee rate (entries); defaults to fee_rate
         time_tp_pct:         If > 0, override TP with this fraction after TIME_TP_HOURS
@@ -73,6 +76,8 @@ def backtest_once(
 
     Returns:
         BacktestResult or None if insufficient data.
+        BacktestResult.liquidated=True if any trade was force-liquidated (the
+        optimizer discards such parameter sets).
     """
     if maker_fee_rate is None:
         maker_fee_rate = fee_rate
@@ -99,6 +104,8 @@ def backtest_once(
         rsi_period=entry_params.rsi_period,
     )
 
+    leverage_bt          = float(exit_params.leverage)
+
     # ── Backtest loop ─────────────────────────────────────────────────────────
     wallet               = float(STARTING_WALLET)
     pos_qty              = 0.0
@@ -107,6 +114,8 @@ def backtest_once(
     wallet_at_entry      = 0.0
     in_position          = False
     _highest_high_bt     = 0.0   # Jason McIntosh trailing stop — highest candle-high since entry
+    _liq_price_bt        = 0.0   # spot margin liquidation price (0 = no position)
+    _was_liquidated      = False  # true if any trade hit liquidation
 
     # Time-based TP tightening — tracks when entry occurred and whether applied
     entry_candle_idx:   int  = 0
@@ -138,6 +147,31 @@ def backtest_once(
             # Update McIntosh trailing stop tracker — never moves down
             _highest_high_bt = max(_highest_high_bt, high_last)
 
+            # 0. Liquidation check (spot margin — must precede all other exits)
+            if _liq_price_bt > 0 and low_last <= _liq_price_bt:
+                fill      = _liq_price_bt
+                pnl_gross = (fill - entry_price_bt) * qty_abs
+                exit_fee  = (qty_abs * fill) * fee_rate
+                wallet    = max(0.0, wallet + pnl_gross - exit_fee)
+                pnl_net   = pnl_gross - entry_fee - exit_fee
+                trade_pnls.append(pnl_net)
+                _exit_ts_raw = dfl.iloc[i]["ts"]
+                _exit_ts_ms  = int(_exit_ts_raw.value) // 1_000_000 if hasattr(_exit_ts_raw, "value") else int(_exit_ts_raw)
+                trade_records.append(TradeRecord(
+                    side="LONG", entry_price=entry_price_bt, exit_price=fill,
+                    qty=qty_abs, entry_fee=entry_fee, exit_fee=exit_fee,
+                    pnl_gross=pnl_gross, pnl_net=pnl_net,
+                    reason="LIQUIDATED", wallet_at_entry=wallet_at_entry,
+                    hold_candles=i - entry_candle_idx,
+                    entry_ts_ms=entry_ts_ms_bt, exit_ts_ms=_exit_ts_ms,
+                ))
+                pos_qty = 0.0; entry_price_bt = 0.0; entry_fee = 0.0
+                wallet_at_entry = 0.0; in_position = False
+                entry_candle_idx = 0; time_tp_applied = False
+                _highest_high_bt = 0.0; _liq_price_bt = 0.0
+                _was_liquidated = True
+                exited = True
+
             # 1. Trailing stop (Jason McIntosh — trails below highest candle-high since entry)
             if exit_params.trail_pct > 0:
                 trail_price = _highest_high_bt * (1.0 - float(exit_params.trail_pct))
@@ -161,7 +195,7 @@ def backtest_once(
                     pos_qty = 0.0; entry_price_bt = 0.0; entry_fee = 0.0
                     wallet_at_entry = 0.0; in_position = False
                     entry_candle_idx = 0; time_tp_applied = False
-                    _highest_high_bt = 0.0
+                    _highest_high_bt = 0.0; _liq_price_bt = 0.0
                     exited = True
 
             # 2. Take-profit (price moves up to TP target)
@@ -195,7 +229,7 @@ def backtest_once(
                     pos_qty = 0.0; entry_price_bt = 0.0; entry_fee = 0.0
                     wallet_at_entry = 0.0; in_position = False
                     entry_candle_idx = 0; time_tp_applied = False
-                    _highest_high_bt = 0.0
+                    _highest_high_bt = 0.0; _liq_price_bt = 0.0
                     exited = True
 
             # 3. Hard stop-loss (price falls below entry * (1 - sl_pct))
@@ -221,7 +255,7 @@ def backtest_once(
                     pos_qty = 0.0; entry_price_bt = 0.0; entry_fee = 0.0
                     wallet_at_entry = 0.0; in_position = False
                     entry_candle_idx = 0; time_tp_applied = False
-                    _highest_high_bt = 0.0
+                    _highest_high_bt = 0.0; _liq_price_bt = 0.0
                     exited = True
 
             # 4. Band exit (high drops below premium_k — mirrors discount band entry)
@@ -251,7 +285,7 @@ def backtest_once(
                     pos_qty = 0.0; entry_price_bt = 0.0; entry_fee = 0.0
                     wallet_at_entry = 0.0; in_position = False
                     entry_candle_idx = 0; time_tp_applied = False
-                    _highest_high_bt = 0.0
+                    _highest_high_bt = 0.0; _liq_price_bt = 0.0
                     exited = True
 
         # ── Entry ─────────────────────────────────────────────────────────────
@@ -275,10 +309,14 @@ def backtest_once(
                 else:
                     fill            = apply_slippage(close, "buy")
                     wallet_at_entry = wallet
-                    notional        = wallet * MAX_SYMBOL_FRACTION
+                    # Spot margin: qty is scaled by leverage; margin committed = wallet * fraction
+                    notional        = wallet * MAX_SYMBOL_FRACTION * leverage_bt
                     qty             = notional / fill
                     fee             = notional * maker_fee_rate
                     wallet         -= fee
+                    # Liquidation price: margin runs out when price drops by ~1/leverage
+                    # liq = entry × (leverage-1) / (leverage × (1 - MMR))
+                    _liq_price_bt   = fill * (leverage_bt - 1.0) / (leverage_bt * (1.0 - SPOT_MARGIN_MMR))
                     pos_qty              = qty
                     entry_price_bt       = fill
                     entry_fee            = fee
@@ -316,7 +354,7 @@ def backtest_once(
                     pos_qty = 0.0; entry_price_bt = 0.0; entry_fee = 0.0
                     wallet_at_entry = 0.0; in_position = False
                     entry_candle_idx = 0; time_tp_applied = False
-                    _highest_high_bt = 0.0
+                    _highest_high_bt = 0.0; _liq_price_bt = 0.0
                     exited = True
             # 2. Take-profit (same-bar high)
             if not exited and pos_qty != 0.0:
@@ -340,7 +378,7 @@ def backtest_once(
                     pos_qty = 0.0; entry_price_bt = 0.0; entry_fee = 0.0
                     wallet_at_entry = 0.0; in_position = False
                     entry_candle_idx = 0; time_tp_applied = False
-                    _highest_high_bt = 0.0
+                    _highest_high_bt = 0.0; _liq_price_bt = 0.0
                     exited = True
             # 3. Stop-loss (same-bar low)
             if not exited and pos_qty != 0.0:
@@ -364,7 +402,7 @@ def backtest_once(
                     pos_qty = 0.0; entry_price_bt = 0.0; entry_fee = 0.0
                     wallet_at_entry = 0.0; in_position = False
                     entry_candle_idx = 0; time_tp_applied = False
-                    _highest_high_bt = 0.0
+                    _highest_high_bt = 0.0; _liq_price_bt = 0.0
                     exited = True
             # 4. Band exit (same-bar signal)
             if not exited and pos_qty != 0.0:
@@ -390,7 +428,7 @@ def backtest_once(
                     pos_qty = 0.0; entry_price_bt = 0.0; entry_fee = 0.0
                     wallet_at_entry = 0.0; in_position = False
                     entry_candle_idx = 0; time_tp_applied = False
-                    _highest_high_bt = 0.0
+                    _highest_high_bt = 0.0; _liq_price_bt = 0.0
                     exited = True
 
         # ── Equity snapshot ───────────────────────────────────────────────────
@@ -435,7 +473,7 @@ def backtest_once(
         pnl_pct=float(pnl_p),
         trades=int(n),
         winrate=float(wr),
-        liquidated=False,
+        liquidated=_was_liquidated,
         sharpe_ratio=float(sharpe),
         max_drawdown_pct=float(max_dd),
         wallet_history=wallet_history,

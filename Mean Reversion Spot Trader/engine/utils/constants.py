@@ -11,7 +11,7 @@ CATEGORY         = "spot"
 
 DAYS_BACK_SEED    = 30                       # history window for seed + re-opt (max 30 days)
 STARTING_WALLET   = 100.0
-DEFAULT_LEVERAGE  = 1.0                      # spot trading: no leverage
+DEFAULT_LEVERAGE  = 3.0                      # spot margin default leverage
 
 MAX_SYMBOL_FRACTION = 0.45    # max margin per symbol (45% of account)
 MAX_ACTIVE_SYMBOLS  = 1
@@ -102,7 +102,8 @@ OPT_TP_MIN_BP       = 20    # 0.20% price move (1× ATR on 3-min)
 OPT_TP_MAX_BP       = 100   # 1.00% price move (2.5× ATR on 15-min)
 
 # Stop-loss (in basis points; 50 = 0.50%, 900 = 9.00%)
-# Upper bound set for reasonable downside protection on 1× spot.
+# Upper bound intentionally below the minimum liquidation distance at max leverage
+# (10× → liq at ~9% below entry) so the optimizer always finds SL-before-liquidation params.
 OPT_SL_MIN_BP       = 50    # 0.50% above entry
 OPT_SL_MAX_BP       = 900   # 9.00% above entry
 
@@ -128,9 +129,15 @@ OPT_ADX_PERIOD_MAX  = 21
 OPT_RSI_PERIOD_MIN  = 7
 OPT_RSI_PERIOD_MAX  = 21
 
-# Leverage (fixed at 1 for spot trading — no leverage)
-OPT_LEVERAGE_MIN    = 1
-OPT_LEVERAGE_MAX    = 1
+# Leverage — discrete spot margin values tested by the optimizer
+# Bybit spot margin supports: 2×, 3×, 4×, 8×, 10×
+OPT_LEVERAGE_VALUES = [2, 3, 4, 8, 10]
+OPT_LEVERAGE_MIN    = 2
+OPT_LEVERAGE_MAX    = 10
+
+# Spot margin maintenance margin rate (Bybit default ~0.5%)
+# Used to compute the liquidation price: liq = entry × (lev-1) / (lev × (1 - MMR))
+SPOT_MARGIN_MMR     = 0.005
 
 # Backtest window per trial (days; fixed at 5 for fast spot optimisation)
 OPT_MIN_DAYS        = 5
@@ -154,7 +161,7 @@ EXPLOIT_RSI_LO_RADIUS             = 5    # ±5 around saved best RSI neutral-low
 EXPLOIT_BAND_EMA_RADIUS           = 2    # ±2 around saved best band EMA length
 EXPLOIT_ADX_PERIOD_RADIUS         = 2    # ±2 around saved best ADX period
 EXPLOIT_RSI_PERIOD_RADIUS         = 2    # ±2 around saved best RSI period
-EXPLOIT_LEVERAGE_RADIUS           = 0    # leverage fixed at 1 for spot
+EXPLOIT_LEVERAGE_RADIUS           = 1    # explore ±1 step in OPT_LEVERAGE_VALUES list
 
 # ── Runtime behaviour ─────────────────────────────────────────────────────────
 KEEP_CANDLES            = 3000

@@ -563,14 +563,12 @@ class BybitPrivateClient:
                 return
             raise
 
-    def ensure_futures_setup(self, symbol: str):
+    def ensure_futures_setup(self, symbol: str, leverage: float = 1.0):
         """One-time setup for a symbol before live trading begins.
-        For spot: no leverage or margin mode setup needed — no-op.
+        For spot margin: sets buy/sell leverage via set_leverage.
         For linear: sets leverage (margin mode must be set in Bybit UI)."""
-        if CATEGORY == "spot":
-            return
-        leverage = leverage_for(symbol)
-        self.set_leverage(symbol, leverage, leverage)
+        lev = leverage if leverage > 1.0 else leverage_for(symbol)
+        self.set_leverage(symbol, lev, lev)
 
     def get_wallet_balance(self) -> float:
         """Alias for get_unified_usdt(). Provided for interface consistency."""
@@ -651,7 +649,10 @@ class BybitPrivateClient:
             "timeInForce": "IOC",
             "orderLinkId": link_id,
         }
-        if CATEGORY != "spot":
+        if CATEGORY == "spot":
+            # isLeverage=1 activates spot margin borrowing on Bybit Unified account
+            body["isLeverage"] = "1"
+        else:
             body["positionIdx"] = 0
             body["reduceOnly"] = reduce_only
         j = rest_request("POST", "/v5/order/create", body=body, auth=True)

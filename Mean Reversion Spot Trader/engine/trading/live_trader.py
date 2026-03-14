@@ -91,6 +91,12 @@ class LiveRealTrader:
         self.exit_params  = exit_params
         self.instrument   = self.client.get_instrument_info(self.symbol)
 
+        # Configure spot margin leverage on Bybit before fetching wallet/position
+        try:
+            self.client.ensure_futures_setup(self.symbol, leverage=float(exit_params.leverage))
+        except Exception as _lev_err:
+            log.warning(f"Could not set leverage for {symbol}: {_lev_err}")
+
         self.wallet          = float(self.client.get_unified_usdt())
         self.initial_wallet  = self.wallet
         self.position: Optional[RealPosition] = self.client.get_position(self.symbol)
@@ -280,7 +286,7 @@ class LiveRealTrader:
         wallet_before = self.wallet
         qty = 0.0
         try:
-            max_notional = self.wallet * float(MAX_SYMBOL_FRACTION)
+            max_notional = self.wallet * float(MAX_SYMBOL_FRACTION) * float(self.leverage)
             qty          = self._format_qty(max_notional / c)
             self._ensure_entry_risk_checks(qty, c, wallet_before)
 
@@ -840,6 +846,10 @@ class LiveRealTrader:
                 self.entry_params = best_entry
                 self.exit_params  = best_exit_p
                 self.leverage     = best_exit_p.leverage
+                try:
+                    self.client.ensure_futures_setup(self.symbol, leverage=float(self.leverage))
+                except Exception as _lev_err2:
+                    log.warning(f"[REOPT] Could not update leverage for {self.symbol}: {_lev_err2}")
                 self._recompute_indicators()
                 # Seed analytics for full historical DataFrame so chart shows bands immediately
                 try:
