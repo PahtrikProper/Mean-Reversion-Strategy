@@ -64,6 +64,7 @@ from engine.utils.helpers import (
     supported_intervals,
     taker_fee_for,
 )
+from engine.utils import db_logger as _db
 
 # ── Config helpers (mirrors main.py Config) ───────────────────────────────────
 def _load_config() -> Optional[dict]:
@@ -427,6 +428,27 @@ class _BotController:
                         "score": pf,
                     }
 
+                    # Seed candle_analytics so /api/ready returns true after
+                    # first optimisation — chart browser opener polls this table.
+                    try:
+                        _db.bulk_log_seed_analytics(
+                            df=df_last, symbol=sym, interval=iv,
+                            ma_len=ep.ma_len, band_mult=ep.band_mult,
+                            exit_ma_len=xp.exit_ma_len,
+                            exit_band_mult=float(xp.exit_band_mult),
+                            sl_pct=float(xp.sl_pct),
+                        )
+                    except Exception as _ana_err:
+                        self._log(f"[DB] bulk_log_seed_analytics: {_ana_err}")
+                    try:
+                        _db.bulk_log_backtest_trades(
+                            trade_records=getattr(br, "trade_records", []) or [],
+                            symbol=sym, interval=iv,
+                            entry_params=ep, exit_params=xp,
+                        )
+                    except Exception as _bt_err:
+                        self._log(f"[DB] bulk_log_backtest_trades: {_bt_err}")
+
             if self._stop.is_set():
                 self._emit("status", "idle")
                 self._log("Stopped by user.")
@@ -652,6 +674,28 @@ class _PaperBotController:
                             "interval":   iv,
                             "score":      pf,
                         }
+
+                        # Seed candle_analytics so /api/ready returns true after
+                        # first optimisation — chart browser opener polls this table.
+                        try:
+                            _db.bulk_log_seed_analytics(
+                                df=df_last, symbol=sym, interval=iv,
+                                ma_len=ep.ma_len, band_mult=ep.band_mult,
+                                exit_ma_len=xp.exit_ma_len,
+                                exit_band_mult=float(xp.exit_band_mult),
+                                sl_pct=float(xp.sl_pct),
+                            )
+                        except Exception as _ana_err:
+                            self._log(f"[DB] bulk_log_seed_analytics: {_ana_err}")
+                        try:
+                            _db.bulk_log_backtest_trades(
+                                trade_records=getattr(br, "trade_records", []) or [],
+                                symbol=sym, interval=iv,
+                                entry_params=ep, exit_params=xp,
+                            )
+                        except Exception as _bt_err:
+                            self._log(f"[DB] bulk_log_backtest_trades: {_bt_err}")
+
                     except Exception as exc:
                         self._log(f"Skipping {sym} {iv}m: {exc}")
                         self._emit("agent", f"  ✗  {sym} {iv}m: {exc}")

@@ -231,6 +231,27 @@ def run_live_trading():
                 "score":        pf,
             }
 
+            # Seed candle_analytics so /api/ready returns true immediately after
+            # the first optimisation — chart browser opener polls this table.
+            try:
+                _db.bulk_log_seed_analytics(
+                    df=df_last, symbol=symbol, interval=interval,
+                    ma_len=ep.ma_len, band_mult=ep.band_mult,
+                    exit_ma_len=xp.exit_ma_len,
+                    exit_band_mult=float(xp.exit_band_mult),
+                    sl_pct=float(xp.sl_pct),
+                )
+            except Exception as _ana_err:
+                print(f"  [DB] bulk_log_seed_analytics failed: {_ana_err}")
+            try:
+                _db.bulk_log_backtest_trades(
+                    trade_records=getattr(br, "trade_records", []) or [],
+                    symbol=symbol, interval=interval,
+                    entry_params=ep, exit_params=xp,
+                )
+            except Exception as _bt_err:
+                print(f"  [DB] bulk_log_backtest_trades failed: {_bt_err}")
+
     # ── Phase 2: Rank and display ─────────────────────────────────────────────
     ranked = sorted(all_results.items(), key=lambda x: x[1]["score"], reverse=True)
 
@@ -400,6 +421,28 @@ def run_paper_trading():
                     "interval":     interval,
                     "score":        pf,
                 }
+
+                # Seed candle_analytics so /api/ready returns true immediately after
+                # the first optimisation — chart browser opener polls this table.
+                try:
+                    _db.bulk_log_seed_analytics(
+                        df=df_last, symbol=symbol, interval=interval,
+                        ma_len=ep.ma_len, band_mult=ep.band_mult,
+                        exit_ma_len=xp.exit_ma_len,
+                        exit_band_mult=float(xp.exit_band_mult),
+                        sl_pct=float(xp.sl_pct),
+                    )
+                except Exception as _ana_err:
+                    print(f"  [DB] bulk_log_seed_analytics failed: {_ana_err}")
+                try:
+                    _db.bulk_log_backtest_trades(
+                        trade_records=getattr(br, "trade_records", []) or [],
+                        symbol=symbol, interval=interval,
+                        entry_params=ep, exit_params=xp,
+                    )
+                except Exception as _bt_err:
+                    print(f"  [DB] bulk_log_backtest_trades failed: {_bt_err}")
+
             except Exception as exc:
                 print(f"  SKIP {symbol} {interval}m: {exc}")
 
