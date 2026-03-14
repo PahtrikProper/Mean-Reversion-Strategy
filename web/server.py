@@ -61,7 +61,7 @@ def _make_app():
 
     # ── REST: historical candles + bands ──────────────────────────────────────
     @app.get("/api/history")
-    async def history(symbol: str = "XRPUSDT", interval: str = "1", limit: int = 10000):
+    async def history(symbol: str = "XRPUSDT", interval: str = "15", limit: int = 10000):
         try:
             conn = _get_conn()
             rows = conn.execute(
@@ -95,7 +95,7 @@ def _make_app():
 
     # ── REST: recent trades ────────────────────────────────────────────────────
     @app.get("/api/trades")
-    async def trades(symbol: str = "XRPUSDT", interval: str = "1"):
+    async def trades(symbol: str = "XRPUSDT", interval: str = "15"):
         try:
             conn = _get_conn()
             rows = conn.execute(
@@ -138,7 +138,7 @@ def _make_app():
     async def ws_endpoint(
         websocket: WebSocket,
         symbol:   str = "XRPUSDT",
-        interval: str = "1",
+        interval: str = "15",
     ):
         await websocket.accept()
         conn = _get_conn()
