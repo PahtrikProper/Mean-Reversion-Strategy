@@ -13,12 +13,9 @@ CATEGORY         = "linear"
 PAPER_STARTING_BALANCE = 500.0
 PAPER_SYMBOLS = ["XRPUSDT", "ETHUSDT", "ESPUSDT", "BTCUSDT"]
 
-DAYS_BACK_SEED    = 1                        # history window for seed + re-opt
+DAYS_BACK_SEED    = 30                       # history window for seed + re-opt (max 30 days)
 STARTING_WALLET   = 100.0
-DEFAULT_LEVERAGE  = 10.0
-LEVERAGE_BY_SYMBOL: Dict[str, float] = {
-    "XRPUSDT": 10.0,
-}
+DEFAULT_LEVERAGE  = 10.0                     # fallback before first optimizer run
 
 MAX_SYMBOL_FRACTION = 0.45    # max margin per symbol (45% of account)
 MAX_ACTIVE_SYMBOLS  = 1
@@ -60,6 +57,15 @@ DEFAULT_TP_PCT         = 0.003  # 0.30% take-profit (default; now also optimised
 ADX_THRESHOLD   = 25.0  # ADX must be below this for entry (range-bound regime)
 RSI_NEUTRAL_LO  = 50.0  # RSI must be >= this at candle close (overbought confirmation)
 BAND_EMA_LENGTH = 5     # EMA smoothing period applied to all 8 premium/discount bands
+ADX_PERIOD      = 14    # Wilder's ADX calculation period (optimised at runtime; default 14)
+RSI_PERIOD      = 14    # Wilder's RSI calculation period (optimised at runtime; default 14)
+
+# ── Volume liquidity filter ────────────────────────────────────────────────────
+# Skip entry if our position notional exceeds this fraction of the candle's USDT
+# volume.  Catches pathologically thin candles.  Fixed constant (not optimised)
+# because at typical XRP position sizes vs $500K–$5M candle volumes the filter
+# almost never fires; making it a search dim would add noise without signal.
+VOL_FILTER_MAX_PCT = 0.05   # 5% of candle USDT volume
 
 # ── Hard stop-loss (SHORT exit) ───────────────────────────────────────────────
 # Fires when: current_high >= entry_price * (1 + sl_pct)
@@ -113,6 +119,22 @@ OPT_RSI_LO_MAX      = 60
 OPT_BAND_EMA_MIN    = 2
 OPT_BAND_EMA_MAX    = 15
 
+# ADX calculation period (integer; 7 = sensitive, 21 = smooth)
+OPT_ADX_PERIOD_MIN  = 7
+OPT_ADX_PERIOD_MAX  = 21
+
+# RSI calculation period (integer; 7 = sensitive, 21 = smooth)
+OPT_RSI_PERIOD_MIN  = 7
+OPT_RSI_PERIOD_MAX  = 21
+
+# Leverage (integer steps; 2 = conservative, 14 = aggressive; replaces GUI setting)
+OPT_LEVERAGE_MIN    = 2
+OPT_LEVERAGE_MAX    = 14
+
+# Backtest window per trial (days; drawn uniformly at random for each trial)
+OPT_MIN_DAYS        = 5
+OPT_MAX_DAYS        = 30
+
 OPT_N_RANDOM      = INIT_TRIALS
 OPT_MIN_TRADES    = 1
 
@@ -129,6 +151,9 @@ EXPLOIT_EXIT_BAND_MULT_RADIUS_X10 = 3    # ±0.3 around saved best exit band_mul
 EXPLOIT_ADX_RADIUS                = 2    # ±2 around saved best ADX threshold
 EXPLOIT_RSI_LO_RADIUS             = 5    # ±5 around saved best RSI neutral-low
 EXPLOIT_BAND_EMA_RADIUS           = 2    # ±2 around saved best band EMA length
+EXPLOIT_ADX_PERIOD_RADIUS         = 2    # ±2 around saved best ADX period
+EXPLOIT_RSI_PERIOD_RADIUS         = 2    # ±2 around saved best RSI period
+EXPLOIT_LEVERAGE_RADIUS           = 2    # ±2× around saved best leverage
 
 # ── Runtime behaviour ─────────────────────────────────────────────────────────
 KEEP_CANDLES            = 3000

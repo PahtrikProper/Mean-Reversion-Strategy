@@ -59,7 +59,6 @@ from engine.utils.api_key_prompt import (
     validate_api_credentials,
 )
 from engine.utils.helpers import (
-    leverage_for,
     maker_fee_for,
     supported_intervals,
     taker_fee_for,
@@ -89,7 +88,6 @@ def _apply_config(cfg: dict) -> None:
     if not cfg:
         return
     # NOTE: "symbol" key is intentionally NOT applied here — seeded at init.
-    if "leverage"        in cfg: C.DEFAULT_LEVERAGE = float(cfg["leverage"])
     if "starting_wallet" in cfg: C.STARTING_WALLET  = float(cfg["starting_wallet"])
     if "entry" in cfg:
         ec = cfg["entry"]
@@ -337,26 +335,6 @@ class _BotController:
             client    = bot.BybitPrivateClient()
             gate      = bot.PositionGate()
 
-            # Sync leverage — fetch actual setting from Bybit and log it clearly
-            # so the user can see exactly what leverage the live backtest uses.
-            self._log("Verifying account settings…")
-            _gui_lev = C.DEFAULT_LEVERAGE   # capture GUI/config value before overwrite
-            _lev_strs: list = []
-            for sym in symbols:
-                lev = client.get_leverage(sym)
-                C.LEVERAGE_BY_SYMBOL[sym] = lev
-                C.DEFAULT_LEVERAGE        = lev
-                self._log(f"{sym}: Bybit leverage = {lev:.0f}x")
-                _lev_strs.append(f"{int(lev)}x")
-                if abs(lev - _gui_lev) > 0.5:
-                    self._log(
-                        f"⚠️  Leverage mismatch — Bybit returned {lev:.0f}x "
-                        f"but GUI/config had {_gui_lev:.0f}x. "
-                        f"Set leverage to {_gui_lev:.0f}x on Bybit for {sym} "
-                        f"to match your paper backtest."
-                    )
-            self._emit("leverage", " / ".join(_lev_strs) if _lev_strs else "--")
-
             # ── Optimisation phase ────────────────────────────────────────────
             n_pairs  = len(symbols) * len(intervals)
             pair_idx = 0
@@ -420,7 +398,6 @@ class _BotController:
                         trials=C.INIT_TRIALS,
                         lookback_candles=min(len(df_last), len(df_mark)),
                         event_name=f"INIT_{sym}_{iv}m",
-                        leverage=leverage_for(sym),
                         fee_rate=taker_fee_for(sym),
                         maker_fee_rate=maker_fee_for(sym),
                         interval_minutes=int(iv),
@@ -484,7 +461,7 @@ class _BotController:
                 self._emit("best_params", {
                     "symbol":        _sym,
                     "interval":      _d["interval"],
-                    "leverage":      leverage_for(_sym),
+                    "leverage":      _xp.leverage,
                     "ma_len":        _ep.ma_len,
                     "band_mult":     _ep.band_mult,
                     "tp_pct":        _xp.tp_pct * 100.0,
@@ -581,13 +558,6 @@ class _PaperBotController:
             # Paper mode: each symbol gets its own independent PositionGate so
             # all four symbols can trade simultaneously without blocking each other.
 
-            # Apply the user-selected leverage to all paper symbols.
-            # Always overwrite — do not skip if a prior live session set a different value.
-            for sym in symbols:
-                C.LEVERAGE_BY_SYMBOL[sym] = C.DEFAULT_LEVERAGE
-            self._log(f"Paper leverage = {int(C.DEFAULT_LEVERAGE)}x  (all symbols)")
-            self._emit("leverage", f"{int(C.DEFAULT_LEVERAGE)}x")
-
             n_pairs  = len(symbols) * len(intervals)
             pair_idx = 0
             results: Dict = {}
@@ -653,7 +623,6 @@ class _PaperBotController:
                             trials=C.INIT_TRIALS,
                             lookback_candles=min(len(df_last), len(df_mark)),
                             event_name=f"PAPER_INIT_{sym}_{iv}m",
-                            leverage=leverage_for(sym),
                             fee_rate=taker_fee_for(sym),
                             maker_fee_rate=maker_fee_for(sym),
                             interval_minutes=int(iv),
@@ -726,7 +695,7 @@ class _PaperBotController:
                 self._emit("best_params", {
                     "symbol":         _sym,
                     "interval":       _d["interval"],
-                    "leverage":       leverage_for(_sym),
+                    "leverage":       _xp.leverage,
                     "ma_len":         _ep.ma_len,
                     "band_mult":      _ep.band_mult,
                     "tp_pct":         _xp.tp_pct * 100.0,
@@ -827,7 +796,6 @@ class App(ctk.CTk):
         if _early_cfg:
             if "symbol" in _early_cfg:
                 C.SYMBOLS = [_early_cfg["symbol"]]   # live only — paper scans all 4
-            if "leverage"        in _early_cfg: C.DEFAULT_LEVERAGE = float(_early_cfg["leverage"])
             if "starting_wallet" in _early_cfg: C.STARTING_WALLET  = float(_early_cfg["starting_wallet"])
 
         self._build_ui()
@@ -1046,38 +1014,6 @@ class App(ctk.CTk):
             text_color="#8b949e", font=ctk.CTkFont(size=12),
         )
         self._lbl_intervals_status.grid(row=3, column=3, padx=14, pady=(0, 12), sticky="w")
-
-        # ── Leverage row (paper trading — live syncs from Bybit) ──────────────
-        ctk.CTkLabel(
-            self._risk_body, text="Leverage:",
-            font=ctk.CTkFont(size=13), text_color="#c9d1d9",
-        ).grid(row=4, column=0, padx=(14, 8), pady=(0, 12), sticky="w")
-
-        _lev_options = ["1x", "2x", "3x", "5x", "10x", "15x", "20x", "25x", "50x", "75x", "100x"]
-        _lev_default = f"{int(C.DEFAULT_LEVERAGE)}x"
-        if _lev_default not in _lev_options:
-            _lev_default = "10x"
-        self._leverage_var = ctk.StringVar(value=_lev_default)
-        self._leverage_menu = ctk.CTkOptionMenu(
-            self._risk_body,
-            values=_lev_options,
-            variable=self._leverage_var,
-            width=90,
-        )
-        self._leverage_menu.grid(row=4, column=1, padx=(0, 8), pady=(0, 12))
-
-        self._btn_apply_leverage = ctk.CTkButton(
-            self._risk_body, text="Apply", width=80,
-            command=self._apply_leverage,
-        )
-        self._btn_apply_leverage.grid(row=4, column=2, padx=(0, 14), pady=(0, 12), sticky="w")
-
-        self._lbl_leverage_status = ctk.CTkLabel(
-            self._risk_body,
-            text=f"Current: {int(C.DEFAULT_LEVERAGE)}x  (paper — live syncs from Bybit)",
-            text_color="#8b949e", font=ctk.CTkFont(size=12),
-        )
-        self._lbl_leverage_status.grid(row=4, column=3, padx=14, pady=(0, 12), sticky="w")
 
         # ── Take Profit row ───────────────────────────────────────────────────
         ctk.CTkLabel(
@@ -1575,26 +1511,6 @@ class App(ctk.CTk):
                 text_color="#3fb950",
             )
 
-    def _apply_leverage(self) -> None:
-        raw = self._leverage_var.get().replace("x", "").strip()
-        try:
-            lev = float(raw)
-        except ValueError:
-            return
-        if lev <= 0:
-            return
-        C.DEFAULT_LEVERAGE = lev
-        # Apply immediately to all configured paper symbols so the
-        # liquidation price calculation uses the correct leverage from the start.
-        for sym in C.SYMBOLS:
-            C.LEVERAGE_BY_SYMBOL[sym] = lev
-        # Persist so restart picks up the new value instead of reverting to config file.
-        _save_config({"leverage": lev})
-        self._lbl_leverage_status.configure(
-            text=f"Current: {int(lev)}x  (paper — live syncs from Bybit)",
-            text_color="#3fb950",
-        )
-
     def _apply_tp(self) -> None:
         raw = self._tp_var.get().replace("%", "").strip()
         try:
@@ -1659,8 +1575,6 @@ class App(ctk.CTk):
         for _cb in self._iv_checks:
             _cb.configure(state="disabled")
         self._btn_apply_intervals.configure(state="disabled")
-        self._leverage_menu.configure(state="disabled")
-        self._btn_apply_leverage.configure(state="disabled")
         self._prog_outer.grid()
         self._prog_bar.set(0)
 
@@ -1792,8 +1706,6 @@ class App(ctk.CTk):
             for _cb in self._iv_checks:
                 _cb.configure(state="normal")
             self._btn_apply_intervals.configure(state="normal")
-            self._leverage_menu.configure(state="normal")
-            self._btn_apply_leverage.configure(state="normal")
             self._set_status("idle")
             self._lbl_ctrl_msg.configure(text="Ready to start")
             self._prog_outer.grid_remove()

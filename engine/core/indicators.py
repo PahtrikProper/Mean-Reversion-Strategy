@@ -17,13 +17,8 @@ import pandas as pd
 import numpy as np
 from typing import Optional
 
-from ..utils.constants import ADX_THRESHOLD, RSI_NEUTRAL_LO, BAND_EMA_LENGTH
-
-# ─── Fixed gate constants ────────────────────────────────────────────────────────
-
-ADX_PERIOD     = 14
-RSI_PERIOD     = 14
-# ADX_THRESHOLD, RSI_NEUTRAL_LO, BAND_EMA_LENGTH imported from constants
+from ..utils.constants import ADX_THRESHOLD, RSI_NEUTRAL_LO, BAND_EMA_LENGTH, ADX_PERIOD, RSI_PERIOD
+# ADX_THRESHOLD, RSI_NEUTRAL_LO, BAND_EMA_LENGTH, ADX_PERIOD, RSI_PERIOD imported from constants
 # (re-exported here so existing imports like `from indicators import ADX_THRESHOLD` still work)
 
 
@@ -99,13 +94,8 @@ def build_bands(
 
 # ─── ATR (Wilder's method) ───────────────────────────────────────────────────────
 
-def calculate_atr(df: pd.DataFrame, period: int = 14) -> np.ndarray:
-    """Wilder's Average True Range using RMA smoothing.
-
-    Used for the Jason McIntosh ATR trailing stop:
-        SHORT exit stop = min_low_since_entry + trail_atr_mult * ATR(trail_atr_period)
-    Also reused internally by calculate_adx.
-    """
+def _calculate_atr(df: pd.DataFrame, period: int = 14) -> np.ndarray:
+    """Wilder's Average True Range using RMA smoothing. Private — used internally by calculate_adx."""
     high  = df["high"].to_numpy(dtype=float)
     low   = df["low"].to_numpy(dtype=float)
     close = df["close"].to_numpy(dtype=float)
@@ -139,8 +129,7 @@ def calculate_adx(df: pd.DataFrame, period: int = ADX_PERIOD) -> np.ndarray:
     low   = df["low"].to_numpy(dtype=float)
     n = len(df)
 
-    # Reuse calculate_atr for True Range smoothing
-    atr = calculate_atr(df, period)
+    atr = _calculate_atr(df, period)
 
     # Directional Movement
     plus_dm_list  = []
@@ -232,6 +221,8 @@ def build_indicators(
     exit_ma_len: Optional[int] = None,
     exit_band_mult: Optional[float] = None,
     band_ema_len: int = BAND_EMA_LENGTH,
+    adx_period: int = ADX_PERIOD,
+    rsi_period: int = RSI_PERIOD,
 ) -> pd.DataFrame:
     """Build all indicators needed for entry and exit.
 
@@ -242,11 +233,11 @@ def build_indicators(
         premium_1..8   — EMA-smoothed premium bands   (entry signals; uses ma_len + band_mult)
         discount_1..8  — EMA-smoothed discount bands  (exit signals;  uses exit_ma_len + exit_band_mult
                           when provided, otherwise falls back to ma_len + band_mult)
-        adx            — ADX(14) Wilder (entry gate)
-        rsi            — RSI(14) Wilder (entry gate)
-        atr            — ATR(14) Wilder  (retained for diagnostic DB logging)
+        adx            — ADX(adx_period) Wilder (entry gate)
+        rsi            — RSI(rsi_period) Wilder (entry gate)
 
     band_ema_len controls EMA smoothing applied to all 8 bands (both premium + discount).
+    adx_period / rsi_period are optimised at runtime (default 14).
     """
     # Build entry (premium) bands — and discount bands from same params as baseline
     df = build_bands(df_raw.copy(), ma_len, band_mult, band_ema_len=band_ema_len)
@@ -259,9 +250,8 @@ def build_indicators(
         for k in range(1, 9):
             df[f"discount_{k}"] = df_exit[f"discount_{k}"].values
 
-    df["adx"] = calculate_adx(df, ADX_PERIOD)
-    df["rsi"] = calculate_rsi(df, RSI_PERIOD)
-    df["atr"] = calculate_atr(df, ADX_PERIOD)   # ADX_PERIOD = 14
+    df["adx"] = calculate_adx(df, adx_period)
+    df["rsi"] = calculate_rsi(df, rsi_period)
     return df
 
 

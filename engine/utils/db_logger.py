@@ -84,12 +84,8 @@ def validate_or_reset_db(db_path: str) -> bool:
     # Note: params table uses ALTER TABLE migration — existing DBs are upgraded
     # in init_db() so the count should always reach 21 on startup.
     _EXPECTED_MIN: dict = {
-        "candle_analytics": 56,   # id + 52 base + exit_ma_len + exit_band_mult + sl_pct
-        "params":           21,   # id + ts_utc + symbol + interval + event +
-                                  # ma_len + band_mult + adx_threshold + rsi_neutral_lo +
-                                  # band_ema_len + tp_pct + sl_pct + exit_ma_len +
-                                  # exit_band_mult + mc_score + sharpe + pnl_pct +
-                                  # max_drawdown_pct + trade_count + winrate + wallet
+        "candle_analytics": 54,   # id + base cols (atr/atr_pct removed) + exit params
+        "params":           24,   # base 21 + adx_period + rsi_period + leverage
     }
 
     stale = False
@@ -194,8 +190,6 @@ def _create_tables() -> None:
         candle_direction     TEXT,   -- 'bullish', 'bearish', 'doji'
         -- Core indicators
         ma                   REAL,   -- RMA(close, ma_len) centre line
-        atr                  REAL,
-        atr_pct              REAL,   -- atr / close * 100
         adx                  REAL,
         rsi                  REAL,
         -- Premium bands 1-8
@@ -243,7 +237,6 @@ def _create_tables() -> None:
         final_band_level INTEGER,  -- 0-8; after gate filtering
         adx              REAL,
         rsi              REAL,
-        atr              REAL,
         sl_price_level   REAL,   -- computed stop-loss price (NULL if flat)
         blocked_by       TEXT,   -- 'ADX','RSI','GATE','POSITION', NULL if fired
         open             REAL,
@@ -336,6 +329,9 @@ def _create_tables() -> None:
         sl_pct           REAL,
         exit_ma_len      INTEGER,
         exit_band_mult   REAL,
+        adx_period       INTEGER,
+        rsi_period       INTEGER,
+        leverage         REAL,
         mc_score         REAL,
         sharpe           REAL,
         pnl_pct          REAL,
@@ -347,21 +343,24 @@ def _create_tables() -> None:
 
     -- ── Optimization run summary ─────────────────────────────────────────────
     CREATE TABLE IF NOT EXISTS optimization_runs (
-        id             INTEGER PRIMARY KEY AUTOINCREMENT,
-        run_id         TEXT    NOT NULL,
-        ts_utc         TEXT    NOT NULL,
-        symbol         TEXT    NOT NULL,
-        interval       TEXT,
-        trigger        TEXT,   -- 'STARTUP' or 'REOPT'
-        total_trials   INTEGER,
-        valid_trials   INTEGER,
-        duration_sec   REAL,
-        best_ma_len    INTEGER,
-        best_band_mult REAL,
-        best_tp_pct    REAL,
-        best_pnl_pct   REAL,
-        best_n_losses  INTEGER,
-        accepted       INTEGER  -- 1 = params accepted, 0 = rejected
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id           TEXT    NOT NULL,
+        ts_utc           TEXT    NOT NULL,
+        symbol           TEXT    NOT NULL,
+        interval         TEXT,
+        trigger          TEXT,   -- 'STARTUP' or 'REOPT'
+        total_trials     INTEGER,
+        valid_trials     INTEGER,
+        duration_sec     REAL,
+        best_ma_len      INTEGER,
+        best_band_mult   REAL,
+        best_tp_pct      REAL,
+        best_pnl_pct     REAL,
+        best_n_losses    INTEGER,
+        best_adx_period  INTEGER,
+        best_rsi_period  INTEGER,
+        best_leverage    REAL,
+        accepted         INTEGER  -- 1 = params accepted, 0 = rejected
     );
 
     -- ── Per-trial results ────────────────────────────────────────────────────
@@ -372,6 +371,10 @@ def _create_tables() -> None:
         ma_len           INTEGER,
         band_mult        REAL,
         tp_pct           REAL,
+        adx_period       INTEGER,
+        rsi_period       INTEGER,
+        leverage         REAL,
+        days_tested      INTEGER,
         trades           INTEGER,
         n_wins           INTEGER,
         n_losses         INTEGER,
@@ -479,6 +482,9 @@ def _create_tables() -> None:
         ("sl_pct",         "REAL"),
         ("exit_ma_len",    "INTEGER"),
         ("exit_band_mult", "REAL"),
+        ("adx_period",     "INTEGER"),
+        ("rsi_period",     "INTEGER"),
+        ("leverage",       "REAL"),
     ]
     for _col, _typ in _params_new_cols:
         try:
@@ -577,10 +583,8 @@ def log_candle_analytics(
             return None
 
     ma_val  = _col("main")
-    atr_val = _col("atr")
     adx_val = _col("adx")
     rsi_val = _col("rsi")
-    atr_pct = _safe((atr_val / c * 100) if (atr_val and c and c > 0) else None)
 
     # ── Bands ───────────────────────────────────────────────────────────────
     premiums  = [_col(f"premium_{k}")  for k in range(1, 9)]
@@ -631,7 +635,7 @@ def log_candle_analytics(
         """INSERT INTO candle_analytics (
             ts_utc, symbol, interval,
             body_ratio, upper_wick_ratio, lower_wick_ratio, candle_direction,
-            ma, atr, atr_pct, adx, rsi,
+            ma, adx, rsi,
             premium_1, premium_2, premium_3, premium_4,
             premium_5, premium_6, premium_7, premium_8,
             discount_1, discount_2, discount_3, discount_4,
@@ -646,16 +650,16 @@ def log_candle_analytics(
             ma_len, band_mult,
             exit_ma_len, exit_band_mult, sl_pct
         ) VALUES (
-            ?,?,?,?,?,?,?,?,?,?,?,?,
+            ?,?,?,?,?,?,?,?,?,?,
             ?,?,?,?,?,?,?,?,
             ?,?,?,?,?,?,?,?,
             ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-            ?,?,?,?,?,?,?,?,?,?
+            ?,?,?,?,?,?,?,?,?
         )""",
         (
             ts_utc, symbol, interval,
             body_ratio, upper_wick_ratio, lower_wick_ratio, direction,
-            ma_val, atr_val, atr_pct, adx_val, rsi_val,
+            ma_val, adx_val, rsi_val,
             *premiums,
             *discounts,
             band_width_pct,
@@ -678,7 +682,6 @@ def log_signal(
     final_band_level: int,
     adx: Optional[float],
     rsi: Optional[float],
-    atr: Optional[float],
     sl_price_level: Optional[float],
     blocked_by: Optional[str],
     o: float, h: float, l: float, c: float,
@@ -690,14 +693,14 @@ def log_signal(
         """INSERT INTO signals (
             ts_utc, symbol, interval, signal_type,
             raw_band_level, final_band_level,
-            adx, rsi, atr, sl_price_level, blocked_by,
+            adx, rsi, sl_price_level, blocked_by,
             open, high, low, close,
             ma_len, band_mult, tp_pct
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             ts_utc, symbol, interval, signal_type,
             raw_band_level, final_band_level,
-            _safe(adx), _safe(rsi), _safe(atr), _safe(sl_price_level), blocked_by,
+            _safe(adx), _safe(rsi), _safe(sl_price_level), blocked_by,
             _safe(o), _safe(h), _safe(l), _safe(c),
             ma_len, band_mult, tp_pct,
         ),
@@ -833,20 +836,25 @@ def log_params(
     sl_pct: Optional[float] = None,
     exit_ma_len: Optional[int] = None,
     exit_band_mult: Optional[float] = None,
+    adx_period: Optional[int] = None,
+    rsi_period: Optional[int] = None,
+    leverage: Optional[float] = None,
 ) -> None:
     _execute(
         """INSERT INTO params (
             ts_utc, symbol, interval, event,
             ma_len, band_mult, adx_threshold, rsi_neutral_lo, band_ema_len,
             tp_pct, sl_pct, exit_ma_len, exit_band_mult,
+            adx_period, rsi_period, leverage,
             mc_score, sharpe, pnl_pct, max_drawdown_pct,
             trade_count, winrate, wallet
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             ts_utc, symbol, interval, event,
             ma_len, _safe(band_mult),
             _safe(adx_threshold), _safe(rsi_neutral_lo), band_ema_len,
             _safe(tp_pct), _safe(sl_pct), exit_ma_len, _safe(exit_band_mult),
+            adx_period, rsi_period, _safe(leverage),
             _safe(mc_score), _safe(sharpe), _safe(pnl_pct), _safe(max_drawdown_pct),
             trade_count, _safe(winrate), _safe(wallet),
         ),
@@ -867,6 +875,9 @@ def log_optimization_run(
     best_tp_pct: float,
     best_pnl_pct: float,
     best_n_losses: int,
+    best_adx_period: Optional[int] = None,
+    best_rsi_period: Optional[int] = None,
+    best_leverage: Optional[float] = None,
     accepted: bool = True,
 ) -> None:
     _execute(
@@ -874,13 +885,15 @@ def log_optimization_run(
             run_id, ts_utc, symbol, interval, trigger,
             total_trials, valid_trials, duration_sec,
             best_ma_len, best_band_mult, best_tp_pct, best_pnl_pct, best_n_losses,
+            best_adx_period, best_rsi_period, best_leverage,
             accepted
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             run_id, ts_utc, symbol, interval, trigger,
             total_trials, valid_trials, _safe(duration_sec),
             best_ma_len, _safe(best_band_mult), _safe(best_tp_pct),
             _safe(best_pnl_pct), best_n_losses,
+            best_adx_period, best_rsi_period, _safe(best_leverage),
             1 if accepted else 0,
         ),
     )
@@ -896,6 +909,8 @@ def log_optimization_trials(run_id: str, results: List[dict]) -> None:
         rows.append((
             run_id, i,
             r.get("ma_len"), _safe(r.get("band_mult")), _safe(r.get("tp_pct")),
+            r.get("adx_period"), r.get("rsi_period"), _safe(r.get("leverage")),
+            r.get("days_tested"),
             r.get("trades"), r.get("n_wins"), r.get("n_losses"),
             _safe(r.get("win_rate")), _safe(pf),
             _safe(r.get("return_pct")), _safe(r.get("pnl_usdt")),
@@ -906,12 +921,13 @@ def log_optimization_trials(run_id: str, results: List[dict]) -> None:
         """INSERT INTO optimization_trials (
             run_id, trial_num,
             ma_len, band_mult, tp_pct,
+            adx_period, rsi_period, leverage, days_tested,
             trades, n_wins, n_losses,
             win_rate, profit_factor,
             return_pct, pnl_usdt,
             avg_win, avg_loss,
             max_drawdown_pct, sharpe
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         rows,
     )
 

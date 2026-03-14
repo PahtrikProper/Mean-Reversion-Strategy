@@ -1,5 +1,5 @@
 {
-  "_comment": "Mean Reversion — default strategy configuration",
+  "_comment": "Mean Reversion \u2014 default strategy configuration",
   "symbol": "XRPUSDT",
   "interval": "5",
   "days_back_seed": 1,
@@ -15,15 +15,24 @@
   "exit": {
     "_comment": "Exit: TP, stop-loss (hard SL, optimised), or band exit",
     "holding_days": 30,
-    "tp_pct": 0.0028
+    "tp_pct": 0.002
   },
   "optimizer": {
     "n_trials": 4000,
     "min_trades": 1,
-    "ma_len_range": [2, 300],
-    "band_mult_range": [0.3, 10.0],
-    "tp_range_pct": [0.18, 0.38],
-    "exploit_ratio": 0.60,
+    "ma_len_range": [
+      2,
+      300
+    ],
+    "band_mult_range": [
+      0.3,
+      10.0
+    ],
+    "tp_range_pct": [
+      0.18,
+      0.38
+    ],
+    "exploit_ratio": 0.6,
     "exploit_ma_len_radius": 15,
     "exploit_band_mult_radius": 0.3,
     "exploit_tp_radius_pct": 0.03,

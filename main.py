@@ -165,17 +165,15 @@ def run_live_trading():
     client = bot_module.BybitPrivateClient()
     gate   = bot_module.PositionGate()
 
-    # ── Sync leverage from Bybit before anything else ────────────────────────
+    # ── Read current leverage from Bybit for display only ────────────────────
     print("\n  Checking leverage on Bybit...")
     for symbol in symbols:
         live_lev = client.get_leverage(symbol)
-        const_module.LEVERAGE_BY_SYMBOL[symbol] = live_lev
-        const_module.DEFAULT_LEVERAGE = live_lev
-        print(f"    {symbol}  leverage = {live_lev:.0f}x  (read from Bybit)")
+        print(f"    {symbol}  leverage = {live_lev:.0f}x  (current Bybit setting; will be optimised)")
 
     print(f"\n  Symbols   : {symbols}")
     print(f"  Intervals : {intervals}m")
-    print(f"  Leverage  : {const_module.DEFAULT_LEVERAGE:.0f}x")
+    print(f"  Leverage  : optimised per run  (default {const_module.DEFAULT_LEVERAGE:.0f}x)")
     print(f"  Seed days : {const_module.DAYS_BACK_SEED}")
     print(f"  Trials    : {const_module.INIT_TRIALS}")
     print(f"  Top live  : {n_top} trader(s)\n")
@@ -202,7 +200,6 @@ def run_live_trading():
                 trials          = const_module.INIT_TRIALS,
                 lookback_candles= min(len(df_last), len(df_mark)),
                 event_name      = f"INIT_{symbol}_{interval}m",
-                leverage        = leverage_for(symbol),
                 fee_rate        = taker_fee_for(symbol),
                 maker_fee_rate  = maker_fee_for(symbol),
                 interval_minutes= int(interval),
@@ -339,14 +336,9 @@ def run_paper_trading():
 
     gate = bot_module.PositionGate()
 
-    # Apply the configured leverage to all paper symbols.
-    # Always overwrite so --symbols overrides are respected correctly.
-    for symbol in symbols:
-        const_module.LEVERAGE_BY_SYMBOL[symbol] = const_module.DEFAULT_LEVERAGE
-
     print(f"\n  Symbols   : {symbols}")
     print(f"  Intervals : {intervals}m")
-    print(f"  Leverage  : {const_module.DEFAULT_LEVERAGE:.0f}x (default — no Bybit auth)")
+    print(f"  Leverage  : optimised per run  (default {const_module.DEFAULT_LEVERAGE:.0f}x)")
     print(f"  Seed days : {const_module.DAYS_BACK_SEED}")
     print(f"  Trials    : {const_module.INIT_TRIALS}\n")
 
@@ -377,7 +369,6 @@ def run_paper_trading():
                     trials           = const_module.INIT_TRIALS,
                     lookback_candles = min(len(df_last), len(df_mark)),
                     event_name       = f"PAPER_INIT_{symbol}_{interval}m",
-                    leverage         = leverage_for(symbol),
                     fee_rate         = taker_fee_for(symbol),
                     maker_fee_rate   = maker_fee_for(symbol),
                     interval_minutes = int(interval),

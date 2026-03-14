@@ -4,7 +4,6 @@ from .indicators import (
     rma,
     ema,
     build_bands,
-    calculate_atr,
     calculate_adx,
     calculate_rsi,
     calc_sma,
@@ -24,7 +23,7 @@ from .orders import apply_slippage
 __all__ = [
     "rma", "ema",
     "build_bands",
-    "calculate_atr", "calculate_adx", "calculate_rsi",
+    "calculate_adx", "calculate_rsi",
     "calc_sma",
     "build_indicators",
     "crossover", "crossunder",

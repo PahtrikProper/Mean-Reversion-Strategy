@@ -6,7 +6,6 @@ from typing import List, Dict, Any
 
 # Import constants
 from .constants import (
-    LEVERAGE_BY_SYMBOL,
     DEFAULT_LEVERAGE,
     TAKER_FEE_BY_SYMBOL,
     MAKER_FEE_BY_SYMBOL,
@@ -50,8 +49,8 @@ def now_ms() -> int:
     return int(time.time() * 1000)
 
 def leverage_for(symbol: str) -> float:
-    """Look up the configured leverage for a symbol, falling back to DEFAULT_LEVERAGE."""
-    return float(LEVERAGE_BY_SYMBOL.get(symbol, DEFAULT_LEVERAGE))
+    """Return default leverage. Leverage is now fully optimised; this is a startup fallback."""
+    return float(DEFAULT_LEVERAGE)
 
 def fee_for(symbol: str) -> float:
     """Look up the taker fee rate for a symbol (backward-compat alias)."""

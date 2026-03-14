@@ -28,6 +28,7 @@ from ..utils.constants import (
     SLIPPAGE_TICKS,
     TICK_SIZE,
     TIME_TP_HOURS,
+    VOL_FILTER_MAX_PCT,
 )
 from ..utils.data_structures import TradeRecord, BacktestResult, MCSimResult, EntryParams, ExitParams, MC_SIMS, MC_MIN_TRADES
 from ..core.indicators import (
@@ -48,7 +49,6 @@ def backtest_once(
     risk_df: pd.DataFrame,
     entry_params: EntryParams,
     exit_params: ExitParams,
-    leverage: float = 10.0,
     fee_rate: float = FEE_RATE,
     maker_fee_rate: Optional[float] = None,
     time_tp_pct: float = 0.0,
@@ -60,9 +60,8 @@ def backtest_once(
         df_last_raw:         Last-price OHLCV (ts, open, high, low, close, volume)
         df_mark_raw:         Mark-price OHLCV (ts, open, high, low, close)
         risk_df:             Bybit risk tier table
-        entry_params:        EntryParams(ma_len, band_mult)
-        exit_params:         ExitParams(tp_pct)
-        leverage:            Leverage multiplier
+        entry_params:        EntryParams — includes adx_period, rsi_period
+        exit_params:         ExitParams  — includes leverage (optimised 2–14×), tp_pct, sl_pct
         fee_rate:            Taker fee rate (exits)
         maker_fee_rate:      Maker fee rate (entries); defaults to fee_rate
         time_tp_pct:         If > 0, override TP with this fraction after TIME_TP_HOURS
@@ -76,6 +75,7 @@ def backtest_once(
     """
     if maker_fee_rate is None:
         maker_fee_rate = fee_rate
+    leverage = float(exit_params.leverage)
 
     min_len = max(entry_params.ma_len, exit_params.exit_ma_len) + 20
 
@@ -103,6 +103,8 @@ def backtest_once(
         exit_ma_len=exit_params.exit_ma_len,
         exit_band_mult=exit_params.exit_band_mult,
         band_ema_len=entry_params.band_ema_len,
+        adx_period=entry_params.adx_period,
+        rsi_period=entry_params.rsi_period,
     )
 
     # ── Backtest loop ─────────────────────────────────────────────────────────
@@ -253,18 +255,25 @@ def backtest_once(
                 adx_threshold=entry_params.adx_threshold,
                 rsi_neutral_lo=entry_params.rsi_neutral_lo,
             ) > 0:
-                fill            = apply_slippage(close, "sell")
-                wallet_at_entry = wallet
-                notional        = wallet * leverage
-                qty             = notional / fill
-                fee             = notional * maker_fee_rate
-                wallet         -= fee
-                pos_qty              = -qty
-                entry_price_bt       = fill
-                entry_fee            = fee
-                in_position      = True
-                entry_candle_idx = i          # record candle index for time TP
-                time_tp_applied      = False
+                # Volume liquidity filter — skip if our notional > VOL_FILTER_MAX_PCT
+                # of the candle's USDT volume (catches pathologically thin candles).
+                _candle_usdt_vol = float(row.get("volume", 0)) * close
+                _pos_notional    = wallet * leverage
+                if _candle_usdt_vol > 0 and (_pos_notional / _candle_usdt_vol) > VOL_FILTER_MAX_PCT:
+                    pass  # insufficient liquidity — skip entry
+                else:
+                    fill            = apply_slippage(close, "sell")
+                    wallet_at_entry = wallet
+                    notional        = wallet * leverage
+                    qty             = notional / fill
+                    fee             = notional * maker_fee_rate
+                    wallet         -= fee
+                    pos_qty              = -qty
+                    entry_price_bt       = fill
+                    entry_fee            = fee
+                    in_position      = True
+                    entry_candle_idx = i          # record candle index for time TP
+                    time_tp_applied      = False
 
         # ── Equity snapshot ───────────────────────────────────────────────────
         if pos_qty != 0.0:

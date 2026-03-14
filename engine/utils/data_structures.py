@@ -15,6 +15,9 @@ from .constants import (
     ADX_THRESHOLD,
     RSI_NEUTRAL_LO,
     BAND_EMA_LENGTH,
+    DEFAULT_LEVERAGE,
+    ADX_PERIOD,
+    RSI_PERIOD,
 )
 
 
@@ -89,13 +92,15 @@ class EntryParams:
         AND ADX < adx_threshold (range-bound regime; default 25)
         AND RSI >= rsi_neutral_lo (neutral-to-overbought close confirms the fade; default 50)
 
-    All five fields are optimised at runtime by the random-search optimizer.
+    All seven fields are optimised at runtime by the random-search optimizer.
     """
     ma_len:         int   = DEFAULT_MA_LEN    # RMA period for band centre line
     band_mult:      float = DEFAULT_BAND_MULT # Band width multiplier (%)
     adx_threshold:  float = ADX_THRESHOLD     # Max ADX for entry (range-bound gate)
     rsi_neutral_lo: float = RSI_NEUTRAL_LO    # Min RSI at close (overbought confirmation)
     band_ema_len:   int   = BAND_EMA_LENGTH   # EMA smoothing on all 8 premium/discount bands
+    adx_period:     int   = ADX_PERIOD        # Wilder's ADX calculation period (optimised)
+    rsi_period:     int   = RSI_PERIOD        # Wilder's RSI calculation period (optimised)
 
 
 @dataclass
@@ -116,11 +121,14 @@ class ExitParams:
     exit signal.  These are optimised independently from the entry (premium)
     band params (EntryParams.ma_len / band_mult), allowing the system to find
     different sensitivity for exiting vs entering.
+
+    leverage is optimised (2–14×) — controls position sizing and liquidation distance.
     """
-    tp_pct:         float = DEFAULT_TP_PCT       # take-profit fraction (e.g. 0.0028 = 0.28%)
-    sl_pct:         float = STOP_LOSS_PCT        # stop-loss fraction above entry (e.g. 0.05 = 5.0%)
+    tp_pct:         float = DEFAULT_TP_PCT         # take-profit fraction (e.g. 0.0028 = 0.28%)
+    sl_pct:         float = STOP_LOSS_PCT          # stop-loss fraction above entry (e.g. 0.05 = 5.0%)
     exit_ma_len:    int   = DEFAULT_EXIT_MA_LEN    # RMA period for discount (exit) band centre line
     exit_band_mult: float = DEFAULT_EXIT_BAND_MULT # exit band width multiplier (%)
+    leverage:       float = DEFAULT_LEVERAGE       # position leverage (optimised; 2–14×)
 
 
 @dataclass

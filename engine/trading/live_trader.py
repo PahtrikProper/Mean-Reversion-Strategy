@@ -47,7 +47,7 @@ from ..utils.data_structures import RealPosition, PendingSignal, EntryParams, Ex
 from ..utils.position_gate import PositionGate
 from ..utils.logger import log_order
 from ..utils import db_logger as _db
-from ..utils.helpers import now_ms, interval_minutes, leverage_for, taker_fee_for, maker_fee_for, supported_intervals
+from ..utils.helpers import now_ms, interval_minutes, taker_fee_for, maker_fee_for, supported_intervals
 from ..utils.trading_status import get_status_monitor
 from ..core.indicators import (
     build_indicators,
@@ -84,7 +84,7 @@ class LiveRealTrader:
         self.client       = client
         self.risk_df      = risk_df
         self.interval     = interval
-        self.leverage     = leverage_for(symbol)
+        self.leverage     = exit_params.leverage
         self.taker_fee    = taker_fee_for(symbol)
         self.maker_fee    = maker_fee_for(symbol)
         self.entry_params = entry_params
@@ -149,6 +149,8 @@ class LiveRealTrader:
             exit_ma_len=self.exit_params.exit_ma_len,
             exit_band_mult=self.exit_params.exit_band_mult,
             band_ema_len=self.entry_params.band_ema_len,
+            adx_period=self.entry_params.adx_period,
+            rsi_period=self.entry_params.rsi_period,
         )
 
     # ── Order helpers ─────────────────────────────────────────────────────────
@@ -702,10 +704,13 @@ class LiveRealTrader:
                                 "adx_threshold":   self.entry_params.adx_threshold,
                                 "rsi_neutral_lo":  self.entry_params.rsi_neutral_lo,
                                 "band_ema_len":    self.entry_params.band_ema_len,
+                                "adx_period":      self.entry_params.adx_period,
+                                "rsi_period":      self.entry_params.rsi_period,
                                 "tp_pct":          self.exit_params.tp_pct,
                                 "sl_pct":          self.exit_params.sl_pct,
                                 "exit_ma_len":     self.exit_params.exit_ma_len,
                                 "exit_band_mult":  self.exit_params.exit_band_mult,
+                                "leverage":        self.exit_params.leverage,
                             }
 
                         opt = optimise_params(
@@ -714,7 +719,6 @@ class LiveRealTrader:
                             trials=INIT_TRIALS,
                             lookback_candles=min(len(df_last), len(df_mark)),
                             event_name=f"REOPT_{sym}_{iv}m",
-                            leverage=leverage_for(sym),
                             fee_rate=taker_fee_for(sym),
                             maker_fee_rate=maker_fee_for(sym),
                             interval_minutes=interval_minutes(iv),
@@ -784,10 +788,13 @@ class LiveRealTrader:
                 adx_threshold=best_entry.adx_threshold,
                 rsi_neutral_lo=best_entry.rsi_neutral_lo,
                 band_ema_len=best_entry.band_ema_len,
+                adx_period=best_entry.adx_period,
+                rsi_period=best_entry.rsi_period,
                 tp_pct=best_exit_p.tp_pct,
                 sl_pct=best_exit_p.sl_pct,
                 exit_ma_len=best_exit_p.exit_ma_len,
                 exit_band_mult=best_exit_p.exit_band_mult,
+                leverage=best_exit_p.leverage,
                 mc_score=new_mc_score if new_mc_score != float("-inf") else None,
                 sharpe=best_br.sharpe_ratio, pnl_pct=best_br.pnl_pct,
                 max_drawdown_pct=best_br.max_drawdown_pct,
@@ -818,7 +825,6 @@ class LiveRealTrader:
                     self.symbol      = best_sym
                     self.risk_df     = best_risk_df
                     self.instrument  = best_inst
-                    self.leverage    = leverage_for(best_sym)
                     self.taker_fee   = taker_fee_for(best_sym)
                     self.maker_fee   = maker_fee_for(best_sym)
                     # Update the traders dict so WS routing follows the new symbol
@@ -838,6 +844,12 @@ class LiveRealTrader:
 
                 self.entry_params = best_entry
                 self.exit_params  = best_exit_p
+                self.leverage     = best_exit_p.leverage
+                try:
+                    lev_int = int(best_exit_p.leverage)
+                    self.client.set_leverage(self.symbol, lev_int, lev_int)
+                except Exception as _lev_err:
+                    log.warning(f"[REOPT] set_leverage failed: {_lev_err}")
                 self._recompute_indicators()
                 log.info(
                     f"[REOPT] params updated  {self.symbol} {self.interval}m  "
@@ -962,7 +974,6 @@ class LiveRealTrader:
 
             adx_val = float(row["adx"])
             rsi_val = float(row["rsi"]) if not pd.isna(row["rsi"]) else 100.0
-            atr_val = float(row["atr"]) if "atr" in self.df.columns and not pd.isna(row["atr"]) else 0.0
 
             _raw_short = compute_entry_signals_raw(
                 current_row=row, prev_row=prev,
@@ -1087,7 +1098,7 @@ class LiveRealTrader:
                 ts_utc=ts_utc, symbol=self.symbol, interval=self.interval,
                 signal_type=_sig_type,
                 raw_band_level=_raw_short, final_band_level=_final_short,
-                adx=adx_val, rsi=rsi_val, atr=atr_val if atr_val else None,
+                adx=adx_val, rsi=rsi_val,
                 sl_price_level=_sl_price_lvl,
                 blocked_by=_blocked,
                 o=o, h=h, l=l, c=c,

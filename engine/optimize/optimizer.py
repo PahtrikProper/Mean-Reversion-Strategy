@@ -1,24 +1,21 @@
 """Parameter Optimizer — Mean Reversion Strategy
 
-Searches for the best combination of:
-  EntryParams: ma_len, band_mult, adx_threshold, rsi_neutral_lo, band_ema_len
-  ExitParams:  tp_pct, sl_pct, exit_ma_len, exit_band_mult
-
-All 9 dimensions are now optimised (previously tp_pct, adx_threshold,
-rsi_neutral_lo and band_ema_len were hardcoded).
+Searches for the best combination of 12 dimensions:
+  EntryParams: ma_len, band_mult, adx_threshold, rsi_neutral_lo, band_ema_len,
+               adx_period, rsi_period
+  ExitParams:  tp_pct, sl_pct, exit_ma_len, exit_band_mult, leverage
 
 band_mult / exit_band_mult are stored as integer × 10 (3 = 0.3, 100 = 10.0)
 during search for efficient integer arithmetic.
 
 tp_pct is searched in OPT_TP_MIN_BP–OPT_TP_MAX_BP (basis points × 0.0001).
-  Data-driven range: 20–100 bp (0.20%–1.00%) based on ATR% across intervals.
-
 sl_pct is optimised in OPT_SL_MIN_BP–OPT_SL_MAX_BP (basis points × 0.0001).
-  e.g. 500 bp = 5.00% above entry.  Wide by design — pre-liquidation guard.
+adx_period / rsi_period searched in OPT_ADX/RSI_PERIOD_MIN–MAX (7–21).
+leverage searched in OPT_LEVERAGE_MIN–OPT_LEVERAGE_MAX (2–14, integer steps).
 
-adx_threshold is searched in OPT_ADX_MIN–OPT_ADX_MAX (20–28, integers).
-rsi_neutral_lo is searched in OPT_RSI_LO_MIN–OPT_RSI_LO_MAX (40–60, integers).
-band_ema_len is searched in OPT_BAND_EMA_MIN–OPT_BAND_EMA_MAX (2–15, integers).
+Per-trial backtest window: uniform random days ∈ [OPT_MIN_DAYS, OPT_MAX_DAYS]
+(5–30 days), random start offset within the 30-day seeded dataset.
+All windows generated upfront before threads are spawned (RNG is not thread-safe).
 
 Uses randomised search with exploitation/exploration split:
   EXPLOIT_RATIO of trials are sampled near the previously saved best params.
@@ -48,6 +45,9 @@ from ..utils.constants import (
     ADX_THRESHOLD,
     RSI_NEUTRAL_LO,
     BAND_EMA_LENGTH,
+    ADX_PERIOD,
+    RSI_PERIOD,
+    DEFAULT_LEVERAGE,
     OPT_MA_LEN_MIN,             OPT_MA_LEN_MAX,
     OPT_BAND_MULT_X10_MIN,      OPT_BAND_MULT_X10_MAX,
     OPT_EXIT_MA_LEN_MIN,        OPT_EXIT_MA_LEN_MAX,
@@ -57,6 +57,10 @@ from ..utils.constants import (
     OPT_ADX_MIN,                OPT_ADX_MAX,
     OPT_RSI_LO_MIN,             OPT_RSI_LO_MAX,
     OPT_BAND_EMA_MIN,           OPT_BAND_EMA_MAX,
+    OPT_ADX_PERIOD_MIN,         OPT_ADX_PERIOD_MAX,
+    OPT_RSI_PERIOD_MIN,         OPT_RSI_PERIOD_MAX,
+    OPT_LEVERAGE_MIN,           OPT_LEVERAGE_MAX,
+    OPT_MIN_DAYS,               OPT_MAX_DAYS,
     OPT_N_RANDOM,
     OPT_MIN_TRADES,
     RANDOM_SEED,
@@ -70,6 +74,9 @@ from ..utils.constants import (
     EXPLOIT_ADX_RADIUS,
     EXPLOIT_RSI_LO_RADIUS,
     EXPLOIT_BAND_EMA_RADIUS,
+    EXPLOIT_ADX_PERIOD_RADIUS,
+    EXPLOIT_RSI_PERIOD_RADIUS,
+    EXPLOIT_LEVERAGE_RADIUS,
     TIME_TP_HOURS,
     TIME_TP_FALLBACK_PCT,
     TIME_TP_SCALE,
@@ -90,7 +97,6 @@ def optimise_params(
     trials: int,
     lookback_candles: int,
     event_name: str,
-    leverage: float,
     fee_rate: float,
     maker_fee_rate: Optional[float] = None,
     interval_minutes: int = 5,
@@ -102,17 +108,13 @@ def optimise_params(
     db_interval: Optional[str] = None,
     db_trigger: str = "STARTUP",
 ) -> Dict[str, Any]:
-    """Random search over 9 dimensions:
+    """Random search over 12 dimensions:
       (ma_len, band_mult, tp_pct, sl_pct, exit_ma_len, exit_band_mult,
-       adx_threshold, rsi_neutral_lo, band_ema_len)
+       adx_threshold, rsi_neutral_lo, band_ema_len,
+       adx_period, rsi_period, leverage)
 
-    band_mult / exit_band_mult are searched as integer × 10 for efficiency.
-    tp_pct searched in OPT_TP_MIN_BP–OPT_TP_MAX_BP (0.20%–1.00% price move).
-    sl_pct optimised in OPT_SL_MIN_BP–OPT_SL_MAX_BP (0.50–9.00% above entry).
-    adx_threshold searched in OPT_ADX_MIN–OPT_ADX_MAX (20–28).
-    rsi_neutral_lo searched in OPT_RSI_LO_MIN–OPT_RSI_LO_MAX (40–60).
-    band_ema_len searched in OPT_BAND_EMA_MIN–OPT_BAND_EMA_MAX (2–15).
-    exit_ma_len / exit_band_mult control the discount band geometry independently.
+    Per-trial: random contiguous window of OPT_MIN_DAYS–OPT_MAX_DAYS (5–30) days
+    sampled from the full seeded dataset, giving exposure to multiple market regimes.
 
     Returns dict:
         {
@@ -126,31 +128,38 @@ def optimise_params(
     if maker_fee_rate is None:
         maker_fee_rate = fee_rate
 
-    if lookback_candles > 0:
-        dfl = df_last.iloc[-lookback_candles:].copy()
-        dfm = df_mark.iloc[-lookback_candles:].copy()
-    else:
-        dfl = df_last.copy()
-        dfm = df_mark.copy()
+    # Use full dataset — per-trial windows are sliced inside _run_trial
+    dfl = df_last.copy()
+    dfm = df_mark.copy()
+    total_candles = len(dfl)
 
     rng = np.random.default_rng(RANDOM_SEED)
 
-    # ── Build combo list ───────────────────────────────────────────────────────
+    # ── Build combo list + per-trial random windows ────────────────────────────
     n_exploit = int(trials * EXPLOIT_RATIO) if saved_best else 0
 
     seen   = set()
-    combos = []
+    combos = []  # list of (key_tuple, days, offset)
+
+    def _random_window():
+        """Return (days, offset) for a random 5–30 day window within dfl."""
+        days = int(rng.integers(OPT_MIN_DAYS, OPT_MAX_DAYS + 1))
+        n_candles = int(days * 1440.0 / max(interval_minutes, 1))
+        if total_candles <= n_candles:
+            return days, 0
+        offset = int(rng.integers(0, total_candles - n_candles + 1))
+        return days, offset
 
     # Exploitation: sample near saved best
     if saved_best and n_exploit > 0:
-        b_ma     = int(saved_best.get("ma_len", 100))
-        b_bm_x10 = int(np.clip(
+        b_ma         = int(saved_best.get("ma_len", 100))
+        b_bm_x10     = int(np.clip(
             round(float(saved_best.get("band_mult", 2.5)) * 10),
             OPT_BAND_MULT_X10_MIN, OPT_BAND_MULT_X10_MAX))
-        b_tp_bp  = int(np.clip(
+        b_tp_bp      = int(np.clip(
             round(float(saved_best.get("tp_pct", _C.DEFAULT_TP_PCT)) * 10000),
             OPT_TP_MIN_BP, OPT_TP_MAX_BP))
-        b_sl_bp  = int(np.clip(
+        b_sl_bp      = int(np.clip(
             round(float(saved_best.get("sl_pct", STOP_LOSS_PCT)) * 10000),
             OPT_SL_MIN_BP, OPT_SL_MAX_BP))
         b_exit_ma    = int(np.clip(
@@ -159,33 +168,42 @@ def optimise_params(
         b_exit_bm_x10 = int(np.clip(
             round(float(saved_best.get("exit_band_mult", DEFAULT_EXIT_BAND_MULT)) * 10),
             OPT_EXIT_BAND_MULT_X10_MIN, OPT_EXIT_BAND_MULT_X10_MAX))
-        b_adx     = int(np.clip(
+        b_adx        = int(np.clip(
             round(float(saved_best.get("adx_threshold", ADX_THRESHOLD))),
             OPT_ADX_MIN, OPT_ADX_MAX))
-        b_rsi_lo  = int(np.clip(
+        b_rsi_lo     = int(np.clip(
             round(float(saved_best.get("rsi_neutral_lo", RSI_NEUTRAL_LO))),
             OPT_RSI_LO_MIN, OPT_RSI_LO_MAX))
-        b_band_ema = int(np.clip(
+        b_band_ema   = int(np.clip(
             saved_best.get("band_ema_len", BAND_EMA_LENGTH),
             OPT_BAND_EMA_MIN, OPT_BAND_EMA_MAX))
+        b_adx_period = int(np.clip(
+            saved_best.get("adx_period", ADX_PERIOD),
+            OPT_ADX_PERIOD_MIN, OPT_ADX_PERIOD_MAX))
+        b_rsi_period = int(np.clip(
+            saved_best.get("rsi_period", RSI_PERIOD),
+            OPT_RSI_PERIOD_MIN, OPT_RSI_PERIOD_MAX))
+        b_lev        = int(np.clip(
+            round(float(saved_best.get("leverage", DEFAULT_LEVERAGE))),
+            OPT_LEVERAGE_MIN, OPT_LEVERAGE_MAX))
 
         attempts = 0
         while len(combos) < n_exploit and attempts < n_exploit * 20:
             attempts += 1
-            ma     = int(np.clip(
+            ma         = int(np.clip(
                 rng.integers(b_ma - EXPLOIT_MA_LEN_RADIUS, b_ma + EXPLOIT_MA_LEN_RADIUS + 1),
                 OPT_MA_LEN_MIN, OPT_MA_LEN_MAX))
-            bm_x10 = int(np.clip(
+            bm_x10     = int(np.clip(
                 rng.integers(b_bm_x10 - EXPLOIT_BAND_MULT_RADIUS_X10,
                              b_bm_x10 + EXPLOIT_BAND_MULT_RADIUS_X10 + 1),
                 OPT_BAND_MULT_X10_MIN, OPT_BAND_MULT_X10_MAX))
-            tp_bp  = int(np.clip(
+            tp_bp      = int(np.clip(
                 rng.integers(b_tp_bp - EXPLOIT_TP_RADIUS_BP, b_tp_bp + EXPLOIT_TP_RADIUS_BP + 1),
                 OPT_TP_MIN_BP, OPT_TP_MAX_BP))
-            sl_bp  = int(np.clip(
+            sl_bp      = int(np.clip(
                 rng.integers(b_sl_bp - EXPLOIT_SL_RADIUS_BP, b_sl_bp + EXPLOIT_SL_RADIUS_BP + 1),
                 OPT_SL_MIN_BP, OPT_SL_MAX_BP))
-            exit_ma = int(np.clip(
+            exit_ma    = int(np.clip(
                 rng.integers(b_exit_ma - EXPLOIT_EXIT_MA_LEN_RADIUS,
                              b_exit_ma + EXPLOIT_EXIT_MA_LEN_RADIUS + 1),
                 OPT_EXIT_MA_LEN_MIN, OPT_EXIT_MA_LEN_MAX))
@@ -193,19 +211,31 @@ def optimise_params(
                 rng.integers(b_exit_bm_x10 - EXPLOIT_EXIT_BAND_MULT_RADIUS_X10,
                              b_exit_bm_x10 + EXPLOIT_EXIT_BAND_MULT_RADIUS_X10 + 1),
                 OPT_EXIT_BAND_MULT_X10_MIN, OPT_EXIT_BAND_MULT_X10_MAX))
-            adx_int = int(np.clip(
+            adx_int    = int(np.clip(
                 rng.integers(b_adx - EXPLOIT_ADX_RADIUS, b_adx + EXPLOIT_ADX_RADIUS + 1),
                 OPT_ADX_MIN, OPT_ADX_MAX))
             rsi_lo_int = int(np.clip(
                 rng.integers(b_rsi_lo - EXPLOIT_RSI_LO_RADIUS, b_rsi_lo + EXPLOIT_RSI_LO_RADIUS + 1),
                 OPT_RSI_LO_MIN, OPT_RSI_LO_MAX))
-            band_ema = int(np.clip(
+            band_ema   = int(np.clip(
                 rng.integers(b_band_ema - EXPLOIT_BAND_EMA_RADIUS, b_band_ema + EXPLOIT_BAND_EMA_RADIUS + 1),
                 OPT_BAND_EMA_MIN, OPT_BAND_EMA_MAX))
-            key = (ma, bm_x10, tp_bp, sl_bp, exit_ma, exit_bm_x10, adx_int, rsi_lo_int, band_ema)
+            adx_period = int(np.clip(
+                rng.integers(b_adx_period - EXPLOIT_ADX_PERIOD_RADIUS,
+                             b_adx_period + EXPLOIT_ADX_PERIOD_RADIUS + 1),
+                OPT_ADX_PERIOD_MIN, OPT_ADX_PERIOD_MAX))
+            rsi_period = int(np.clip(
+                rng.integers(b_rsi_period - EXPLOIT_RSI_PERIOD_RADIUS,
+                             b_rsi_period + EXPLOIT_RSI_PERIOD_RADIUS + 1),
+                OPT_RSI_PERIOD_MIN, OPT_RSI_PERIOD_MAX))
+            lev_int    = int(np.clip(
+                rng.integers(b_lev - EXPLOIT_LEVERAGE_RADIUS, b_lev + EXPLOIT_LEVERAGE_RADIUS + 1),
+                OPT_LEVERAGE_MIN, OPT_LEVERAGE_MAX))
+            key = (ma, bm_x10, tp_bp, sl_bp, exit_ma, exit_bm_x10,
+                   adx_int, rsi_lo_int, band_ema, adx_period, rsi_period, lev_int)
             if key not in seen:
                 seen.add(key)
-                combos.append(key)
+                combos.append((key, *_random_window()))
 
     # Exploration: fully random
     attempts = 0
@@ -220,10 +250,14 @@ def optimise_params(
         adx_int     = int(rng.integers(OPT_ADX_MIN,                OPT_ADX_MAX                + 1))
         rsi_lo_int  = int(rng.integers(OPT_RSI_LO_MIN,             OPT_RSI_LO_MAX             + 1))
         band_ema    = int(rng.integers(OPT_BAND_EMA_MIN,           OPT_BAND_EMA_MAX           + 1))
-        key = (ma, bm_x10, tp_bp, sl_bp, exit_ma, exit_bm_x10, adx_int, rsi_lo_int, band_ema)
+        adx_period  = int(rng.integers(OPT_ADX_PERIOD_MIN,         OPT_ADX_PERIOD_MAX         + 1))
+        rsi_period  = int(rng.integers(OPT_RSI_PERIOD_MIN,         OPT_RSI_PERIOD_MAX         + 1))
+        lev_int     = int(rng.integers(OPT_LEVERAGE_MIN,           OPT_LEVERAGE_MAX           + 1))
+        key = (ma, bm_x10, tp_bp, sl_bp, exit_ma, exit_bm_x10,
+               adx_int, rsi_lo_int, band_ema, adx_period, rsi_period, lev_int)
         if key not in seen:
             seen.add(key)
-            combos.append(key)
+            combos.append((key, *_random_window()))
 
     total = len(combos)
     if verbose:
@@ -232,10 +266,13 @@ def optimise_params(
               f"BandMult {OPT_BAND_MULT_X10_MIN/10:.1f}-{OPT_BAND_MULT_X10_MAX/10:.1f}%  "
               f"BandEMA {OPT_BAND_EMA_MIN}-{OPT_BAND_EMA_MAX}")
         print(f"  Gates    — ADX<{OPT_ADX_MIN}-{OPT_ADX_MAX}  RSI>={OPT_RSI_LO_MIN}-{OPT_RSI_LO_MAX}")
+        print(f"  Periods  — ADX {OPT_ADX_PERIOD_MIN}-{OPT_ADX_PERIOD_MAX}  RSI {OPT_RSI_PERIOD_MIN}-{OPT_RSI_PERIOD_MAX}")
         print(f"  Exit     — TP {OPT_TP_MIN_BP*0.01:.2f}%-{OPT_TP_MAX_BP*0.01:.2f}%  "
               f"SL {OPT_SL_MIN_BP*0.01:.2f}%-{OPT_SL_MAX_BP*0.01:.2f}%")
         print(f"  ExitBand — MA-len {OPT_EXIT_MA_LEN_MIN}-{OPT_EXIT_MA_LEN_MAX}  "
               f"BandMult {OPT_EXIT_BAND_MULT_X10_MIN/10:.1f}-{OPT_EXIT_BAND_MULT_X10_MAX/10:.1f}%")
+        print(f"  Leverage — {OPT_LEVERAGE_MIN}×–{OPT_LEVERAGE_MAX}×")
+        print(f"  Window   — {OPT_MIN_DAYS}–{OPT_MAX_DAYS} days (random per trial)")
         if saved_best:
             print(f"  Mode: {n_exploit} exploitation + {len(combos)-n_exploit} exploration")
         else:
@@ -246,7 +283,6 @@ def optimise_params(
     _t_start   = time.time()
 
     # Compute data-driven time TP once for the entire optimisation run.
-    # Uses the same DB query that the live/paper traders call at 20h.
     _time_tp_pct: float = TIME_TP_FALLBACK_PCT
     if db_symbol:
         try:
@@ -263,44 +299,60 @@ def optimise_params(
 
     results      = []
     results_lock = threading.Lock()
-    _done_count  = [0]                 # mutable counter for progress callback
+    _done_count  = [0]
     pbar         = tqdm(total=total, desc="Optimising", unit="trial", leave=False) if verbose else None
-    # Limit workers to 2 — more threads compete for the GIL during indicator
-    # computation, starving the Tkinter main thread and causing the macOS
-    # spinning beach-ball.  2 workers give a good speed/responsiveness trade-off.
     n_workers    = min(os.cpu_count() or 2, 2)
 
-    def _run_trial(combo):
-        ma, bm_x10, tp_bp, sl_bp, exit_ma, exit_bm_x10, adx_int, rsi_lo_int, band_ema = combo
+    def _run_trial(combo_entry):
+        key, days, offset = combo_entry
+        (ma, bm_x10, tp_bp, sl_bp, exit_ma, exit_bm_x10,
+         adx_int, rsi_lo_int, band_ema, adx_period, rsi_period, lev_int) = key
+
         band_mult      = bm_x10      / 10.0
         exit_band_mult = exit_bm_x10 / 10.0
         tp = tp_bp * 0.0001
         sl = sl_bp * 0.0001
+
+        # Slice the random window for this trial
+        n_candles = int(days * 1440.0 / max(interval_minutes, 1))
+        if total_candles > n_candles:
+            end = min(offset + n_candles, total_candles)
+            trial_dfl = dfl.iloc[offset:end].copy()
+            trial_dfm = dfm.iloc[offset:end].copy()
+        else:
+            trial_dfl = dfl.copy()
+            trial_dfm = dfm.copy()
+
         ep = EntryParams(
             ma_len=ma,
             band_mult=band_mult,
             adx_threshold=float(adx_int),
             rsi_neutral_lo=float(rsi_lo_int),
             band_ema_len=band_ema,
+            adx_period=adx_period,
+            rsi_period=rsi_period,
         )
-        xp = ExitParams(tp_pct=tp, sl_pct=sl,
-                        exit_ma_len=exit_ma, exit_band_mult=exit_band_mult)
+        xp = ExitParams(
+            tp_pct=tp,
+            sl_pct=sl,
+            exit_ma_len=exit_ma,
+            exit_band_mult=exit_band_mult,
+            leverage=float(lev_int),
+        )
         res = backtest_once(
-            dfl, dfm, risk_df, ep, xp, leverage, fee_rate, maker_fee_rate,
+            trial_dfl, trial_dfm, risk_df, ep, xp, fee_rate, maker_fee_rate,
             time_tp_pct=_time_tp_pct,
             interval_minutes_bt=interval_minutes,
         )
-        return (ma, bm_x10, tp_bp, sl_bp, exit_ma, exit_bm_x10,
-                adx_int, rsi_lo_int, band_ema,
-                band_mult, exit_band_mult, tp, sl, res)
+        return (key, days, band_mult, exit_band_mult, tp, sl, res)
 
     with ThreadPoolExecutor(max_workers=n_workers) as executor:
-        futures = {executor.submit(_run_trial, combo): combo for combo in combos}
+        futures = {executor.submit(_run_trial, ce): ce for ce in combos}
         for future in as_completed(futures):
             try:
+                (key, days, band_mult, exit_band_mult, tp, sl, res) = future.result()
                 (ma, bm_x10, tp_bp, sl_bp, exit_ma, exit_bm_x10,
-                 adx_int, rsi_lo_int, band_ema,
-                 band_mult, exit_band_mult, tp, sl, res) = future.result()
+                 adx_int, rsi_lo_int, band_ema, adx_period, rsi_period, lev_int) = key
             except Exception as _exc:
                 log.debug(f"[OPT] Trial raised: {_exc}")
                 res = None
@@ -330,16 +382,20 @@ def optimise_params(
             if math.isnan(pf):
                 pf = 0.0
 
-            row = {
+            row_result = {
                 "ma_len":           ma,
                 "band_mult":        band_mult,
                 "adx_threshold":    float(adx_int),
                 "rsi_neutral_lo":   float(rsi_lo_int),
                 "band_ema_len":     band_ema,
+                "adx_period":       adx_period,
+                "rsi_period":       rsi_period,
                 "tp_pct":           tp,
                 "sl_pct":           sl,
                 "exit_ma_len":      exit_ma,
                 "exit_band_mult":   exit_band_mult,
+                "leverage":         float(lev_int),
+                "days_tested":      days,
                 "trades":           res.trades,
                 "n_wins":           len(wins),
                 "n_losses":         len(losses),
@@ -354,7 +410,7 @@ def optimise_params(
                 "_result_obj":      res,
             }
             with results_lock:
-                results.append(row)
+                results.append(row_result)
 
     if pbar:
         pbar.close()
@@ -373,12 +429,15 @@ def optimise_params(
         adx_threshold=best["adx_threshold"],
         rsi_neutral_lo=best["rsi_neutral_lo"],
         band_ema_len=best["band_ema_len"],
+        adx_period=best["adx_period"],
+        rsi_period=best["rsi_period"],
     )
     best_exit = ExitParams(
         tp_pct=best["tp_pct"],
         sl_pct=best["sl_pct"],
         exit_ma_len=best["exit_ma_len"],
         exit_band_mult=best["exit_band_mult"],
+        leverage=best["leverage"],
     )
     best_res = best["_result_obj"]
 
@@ -389,8 +448,10 @@ def optimise_params(
             f"  Entry    — MA-len={best_entry.ma_len}  BandMult={best_entry.band_mult:.2f}%  "
             f"BandEMA={best_entry.band_ema_len}\n"
             f"  Gates    — ADX<{best_entry.adx_threshold:.0f}  RSI>={best_entry.rsi_neutral_lo:.0f}\n"
+            f"  Periods  — ADX({best_entry.adx_period})  RSI({best_entry.rsi_period})\n"
             f"  ExitBand — MA-len={best_exit.exit_ma_len}  BandMult={best_exit.exit_band_mult:.2f}%\n"
-            f"  TP={best_exit.tp_pct*100:.2f}%  SL={best_exit.sl_pct*100:.2f}%\n"
+            f"  TP={best_exit.tp_pct*100:.2f}%  SL={best_exit.sl_pct*100:.2f}%  "
+            f"Leverage={best_exit.leverage:.0f}×\n"
             f"  Wins={best['n_wins']}  Losses={best['n_losses']}  WinRate={best['win_rate']:.1f}%  "
             f"PF={pf_str}  Return={best['return_pct']:.2f}%  Trades={best['trades']}\n"
         )
@@ -416,6 +477,9 @@ def optimise_params(
                 best_tp_pct=best_exit.tp_pct,
                 best_pnl_pct=best_res.pnl_pct,
                 best_n_losses=best.get("n_losses", 0),
+                best_adx_period=best_entry.adx_period,
+                best_rsi_period=best_entry.rsi_period,
+                best_leverage=best_exit.leverage,
                 accepted=True,
             )
             _db.log_optimization_trials(_run_id, results)
