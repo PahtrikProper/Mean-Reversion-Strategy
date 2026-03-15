@@ -423,7 +423,7 @@ class LiveRealTrader:
             self._last_entry_fee  = 0.0
             self._time_tp_applied = False
         except Exception as e:
-            log_order(ts_utc=ts_utc, symbol=self.symbol, side="SHORT",
+            log_order(ts_utc=ts_utc, symbol=self.symbol, side="LONG",
                       qty=qty_to_close if qty_to_close else qty_abs,
                       price=close_price, order_type="EXIT", status="FAILED", error=str(e))
             log.error(f"[{ts_utc}] Exit order failed: {e}")

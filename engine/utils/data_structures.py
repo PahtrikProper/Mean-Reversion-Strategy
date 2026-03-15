@@ -92,19 +92,19 @@ class MCSimResult:
 
 @dataclass
 class EntryParams:
-    """Mean Reversion entry parameters.
+    """Mean Reversion entry parameters (LONG spot margin).
 
     Entry fires when:
-        high drops back below premium_k band (band crossover)
+        low crosses back above discount_k band (price bounces from oversold dip)
         AND ADX < adx_threshold (range-bound regime; default 25)
-        AND RSI >= rsi_neutral_lo (neutral-to-overbought close confirms the fade; default 50)
+        AND RSI <= rsi_neutral_lo (neutral-to-oversold close confirms the bounce; default 50)
 
     All seven fields are optimised at runtime by the random-search optimizer.
     """
     ma_len:         int   = DEFAULT_MA_LEN    # RMA period for band centre line
     band_mult:      float = DEFAULT_BAND_MULT # Band width multiplier (%)
     adx_threshold:  float = ADX_THRESHOLD     # Max ADX for entry (range-bound gate)
-    rsi_neutral_lo: float = RSI_NEUTRAL_LO    # Min RSI at close (overbought confirmation)
+    rsi_neutral_lo: float = RSI_NEUTRAL_LO    # Max RSI at close (oversold/neutral confirmation)
     band_ema_len:   int   = BAND_EMA_LENGTH   # EMA smoothing on all 8 premium/discount bands
     adx_period:     int   = ADX_PERIOD        # Wilder's ADX calculation period (optimised)
     rsi_period:     int   = RSI_PERIOD        # Wilder's RSI calculation period (optimised)
@@ -112,21 +112,21 @@ class EntryParams:
 
 @dataclass
 class ExitParams:
-    """Mean Reversion exit parameters (SHORT spot margin).
+    """Mean Reversion exit parameters (LONG spot margin).
 
     Exit fires on (full system priority order):
-        1. Liquidation: high >= entry * (leverage+1) / (leverage * (1+MMR))
-        2. TP:          low  <= entry * (1 - tp_pct)                  [optimised]
-        3. Stop-Loss:   high >= entry * (1 + sl_pct)                  [wide guard before liq]
-        4. Band:        low  drops below discount_k band               [independent exit-band params]
+        1. Liquidation: low  <= entry * (leverage-1) / (leverage * (1-MMR))
+        2. TP:          high >= entry * (1 + tp_pct)                  [optimised]
+        3. Stop-Loss:   low  <= entry * (1 - sl_pct)                  [wide guard before liq]
+        4. Band:        high crosses above premium_k band              [independent exit-band params]
 
-    trail_pct is set to 0.0 — SHORT mean-reversion exits via TP, SL, or band exit.
+    trail_pct is set to 0.0 — LONG mean-reversion exits via TP, SL, or band exit.
 
     SL is intentionally wide (default 5%) — designed to guard against large adverse
     moves before liquidation, not to be routinely triggered.  Optimised alongside TP.
 
-    exit_ma_len / exit_band_mult control the discount bands used for the band
-    exit signal.  These are optimised independently from the entry (premium)
+    exit_ma_len / exit_band_mult control the premium bands used for the band
+    exit signal.  These are optimised independently from the entry (discount)
     band params (EntryParams.ma_len / band_mult), allowing the system to find
     different sensitivity for exiting vs entering.
     """
@@ -141,11 +141,11 @@ class ExitParams:
 @dataclass
 class RealPosition:
     """Snapshot of the live Bybit position fetched via REST."""
-    qty:         float    # positive for SHORT spot margin position (borrowed qty sold)
+    qty:         float    # positive for LONG spot margin position (borrowed USDT used to buy)
     entry_price: float
-    side:        str      # "Sell" (spot SHORT entry)
+    side:        str      # "Buy" (spot LONG entry)
     entry_time:  Optional[object] = None  # pd.Timestamp of entry (tracked locally)
-    liq_price:   Optional[float]  = None  # liquidation price (above entry for SHORT)
+    liq_price:   Optional[float]  = None  # liquidation price (below entry for LONG)
 
 
 @dataclass

@@ -3,7 +3,7 @@
   "symbol": "XRPUSDT",
   "interval": "5",
   "days_back_seed": 5,
-  "leverage": 1.0,
+  "leverage": 3.0,
   "starting_wallet": 100.0,
   "fee_rate": 0.00055,
   "maker_fee_rate": 0.0002,
