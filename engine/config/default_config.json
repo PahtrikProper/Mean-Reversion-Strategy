@@ -17,7 +17,7 @@
     "tp_pct": 0.003
   },
   "optimizer": {
-    "n_trials": 8000,
+    "n_trials": 10000,
     "min_trades": 1
   },
   "risk_pct": 0.85
