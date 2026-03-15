@@ -203,7 +203,7 @@ def backtest_once(
             if not exited and pos_qty != 0.0:
                 sl_price = entry_price_bt * (1.0 - float(exit_params.sl_pct))
                 if low_last <= sl_price:
-                    fill      = apply_slippage(close, "sell")
+                    fill      = apply_slippage(sl_price, "sell")
                     pnl_gross = (fill - entry_price_bt) * qty_abs
                     exit_fee  = (qty_abs * fill) * fee_rate
                     wallet   += pnl_gross - exit_fee
@@ -349,7 +349,7 @@ def backtest_once(
             if not exited and pos_qty != 0.0:
                 sl_price_sb = entry_price_bt * (1.0 - float(exit_params.sl_pct))
                 if low_last <= sl_price_sb:
-                    fill      = apply_slippage(close, "sell")
+                    fill      = apply_slippage(sl_price_sb, "sell")
                     pnl_gross = (fill - entry_price_bt) * qty_abs_sb
                     exit_fee  = (qty_abs_sb * fill) * fee_rate
                     wallet   += pnl_gross - exit_fee

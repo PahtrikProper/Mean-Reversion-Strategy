@@ -904,12 +904,11 @@ class LiveRealTrader:
           2. Refresh wallet/position state from Bybit REST
           3. Skip if not enough candles for warm-up
           4. Detect externally-closed position (server TP or manual close)
-          5. Liquidation (high >= entry * (lev+1) / (lev * (1+MMR)))      [priority 1]
-          6. Take-profit (low  <= entry * (1 - tp_pct))                   [priority 2]
-          7. Stop-loss   (high >= entry * (1 + sl_pct))                   [priority 3]
-          8. Band exit   (low drops below discount_k band)                [priority 4]
-          9. Check entry signal (band crossover AND ADX gate AND RSI gate)
-         10. Log candle-close summary
+          5. Take-profit (high >= entry * (1 + tp_pct))                   [priority 1]
+          6. Stop-loss   (low  <= entry * (1 - sl_pct))                   [priority 2]
+          7. Band exit   (high crosses above premium_k band)              [priority 3]
+          8. Check entry signal (band crossover AND ADX gate AND RSI gate)
+          9. Log candle-close summary
         """
         try:
             ts      = pd.to_datetime(int(candle["start"]), unit="ms", utc=True)
@@ -967,7 +966,7 @@ class LiveRealTrader:
                     if self.position is not None:
                         _ts_ex = pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d %H:%M:%S")
                         log.warning(f"[{self.symbol}] Max-loss: closing open position now")
-                        self._execute_exit(close_price=self.position.mark_price or self.mark_price,
+                        self._execute_exit(close_price=self.mark_price,
                                            reason="MAX_LOSS", ts_utc=_ts_ex)
 
             # ── DB: raw candle ──
