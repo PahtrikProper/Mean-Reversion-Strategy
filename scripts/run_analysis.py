@@ -10,8 +10,8 @@ Usage:
     python scripts/run_analysis.py --symbol ETHUSDT  # override symbol
 
 Cron (every 8 hours):
-    0 */8 * * * cd "/Users/partyproper/Documents/Mean Reversion Trader" &&
-        /opt/homebrew/bin/python3 scripts/run_analysis.py >> data/analysis.log 2>&1
+    0 */8 * * * cd /path/to/Mean-Reversion-Spot-LONG-Margin-Trader &&
+        python3 scripts/run_analysis.py >> data/analysis.log 2>&1
 """
 
 import sys
@@ -126,8 +126,10 @@ def analyse_interval(symbol: str, interval: str, days: int = 1, trials: int = 40
         return None
 
     candle_count = len(df_last)
-    ts_from = df_last.index[0].strftime("%Y-%m-%d %H:%M") if hasattr(df_last.index[0], "strftime") else str(df_last.index[0])
-    ts_to   = df_last.index[-1].strftime("%Y-%m-%d %H:%M") if hasattr(df_last.index[-1], "strftime") else str(df_last.index[-1])
+    _ts0    = df_last["ts"].iloc[0]
+    _ts1    = df_last["ts"].iloc[-1]
+    ts_from = _ts0.strftime("%Y-%m-%d %H:%M") if hasattr(_ts0, "strftime") else str(_ts0)
+    ts_to   = _ts1.strftime("%Y-%m-%d %H:%M") if hasattr(_ts1, "strftime") else str(_ts1)
 
     # ── warm-start from previous best if same symbol/interval ───────────────
     saved_best = None
@@ -147,7 +149,6 @@ def analyse_interval(symbol: str, interval: str, days: int = 1, trials: int = 40
             df_last=df_last, df_mark=df_mark, risk_df=risk_df,
             trials=trials, lookback_candles=len(df_last),
             event_name=f"SCHED_{symbol}_{interval}m",
-            leverage=leverage_for(symbol),
             fee_rate=taker_fee_for(symbol),
             maker_fee_rate=maker_fee_for(symbol),
             interval_minutes=int(interval),
@@ -180,7 +181,7 @@ def analyse_interval(symbol: str, interval: str, days: int = 1, trials: int = 40
 
         raw = compute_entry_signals_raw(
             current_row=row, prev_row=prev,
-            current_high=float(row["high"]),
+            current_low=float(row["low"]),
         )
         if raw > 0:
             raw_signals += 1
@@ -205,10 +206,10 @@ def analyse_interval(symbol: str, interval: str, days: int = 1, trials: int = 40
         "band_mult":   ep.band_mult,
         "tp_pct":      xp.tp_pct,
         "trades":      br.trades,
-        "win_rate":    br.win_rate,
+        "win_rate":    br.winrate,
         "pnl_pct":     br.pnl_pct,
         "max_dd":      br.max_drawdown_pct,
-        "score":       br.score,
+        "score":       br.pnl_pct / (1.0 + br.max_drawdown_pct) if br.max_drawdown_pct >= 0 else 0.0,
         "raw_signals": raw_signals,
         "adx_blocked": adx_blocked,
         "rsi_blocked": rsi_blocked,

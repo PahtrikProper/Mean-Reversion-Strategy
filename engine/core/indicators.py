@@ -229,9 +229,9 @@ def build_indicators(
     Required columns: ts, open, high, low, close, volume
 
     Adds:
-        main           — RMA(close, ma_len)                              (entry centre line)
-        discount_1..8  — EMA-smoothed discount bands  (entry signals;  uses ma_len + band_mult)
-        premium_1..8   — EMA-smoothed premium bands   (exit signals;   uses exit_ma_len + exit_band_mult
+        main           — RMA(close, ma_len)                              (centre line)
+        premium_1..8   — EMA-smoothed premium bands   (exit signals;   always uses ma_len + band_mult)
+        discount_1..8  — EMA-smoothed discount bands  (entry signals;  uses exit_ma_len + exit_band_mult
                           when provided, otherwise falls back to ma_len + band_mult)
         adx            — ADX(adx_period) Wilder (entry gate)
         rsi            — RSI(rsi_period) Wilder (entry gate)

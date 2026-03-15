@@ -112,9 +112,9 @@ class TestCrossover:
 
 
 # ── compute_entry_signals_raw tests ──────────────────────────────────────────
-# The function reads "high" from the row dicts/Series and premium_1..8.
-# Signal fires when: premium_k crosses ABOVE price high
-# (prev_band <= prev_high  AND  curr_band > curr_high)
+# The function reads "low" from the row dicts/Series and discount_1..8.
+# Signal fires when: price low crosses ABOVE discount_k band
+# (prev_low <= prev_band  AND  curr_low > curr_band)  → LONG entry (dip bounce)
 
 class TestComputeEntrySignalsRaw:
     def _make_rows(self, band_val, prev_low, curr_low_unused=None):

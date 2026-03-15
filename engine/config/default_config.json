@@ -13,7 +13,7 @@
     "band_mult": 2.5
   },
   "exit": {
-    "_comment": "Exit: trail stop (McIntosh), TP, hard SL, or band exit",
+    "_comment": "Exit: TP, hard SL, or band exit (no trailing stop; TRAIL_STOP_PCT=0.0)",
     "tp_pct": 0.003
   },
   "optimizer": {

@@ -42,10 +42,10 @@ TIME_TP_FALLBACK_PCT = 0.005  # 0.5% fallback when DB has insufficient data
 TIME_TP_SCALE        = 0.75   # scale factor applied to the data-driven avg
 
 # ── Default strategy parameters ───────────────────────────────────────────────
-DEFAULT_MA_LEN         = 100    # RMA period for entry (premium) band centre line
-DEFAULT_BAND_MULT      = 2.5    # Entry band width multiplier (%)
-DEFAULT_EXIT_MA_LEN    = 100    # RMA period for exit (discount) band centre line
-DEFAULT_EXIT_BAND_MULT = 2.5    # Exit band width multiplier (%)
+DEFAULT_MA_LEN         = 100    # RMA period for premium (exit) band centre line
+DEFAULT_BAND_MULT      = 2.5    # Premium band width multiplier (%)
+DEFAULT_EXIT_MA_LEN    = 100    # RMA period for discount (entry) band centre line; overrides premium when different
+DEFAULT_EXIT_BAND_MULT = 2.5    # Discount band width multiplier (%)
 DEFAULT_TP_PCT         = 0.003  # 0.30% take-profit (default; now also optimised)
 
 # ── Entry gate defaults (also optimised at runtime) ───────────────────────────
