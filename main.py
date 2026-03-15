@@ -5,7 +5,7 @@ Mean Reversion Trader — Mean Reversion Strategy (LONG spot only)
 Entry:  low crosses back above discount_k band (crossover)
         AND ADX < 25  (range-bound regime)
         AND RSI <= 50 (neutral-to-oversold close confirms the bounce)
-Exit:   Trail stop (Jason McIntosh), TP, hard SL, or band exit
+Exit:   Liquidation, TP, hard SL, or band exit (LONG only; trail stop disabled)
         Band: high crosses above premium_k band (mirrors entry logic)
 
 Usage:

@@ -4,8 +4,8 @@ Mean Reversion Trader — Bybit Spot (LONG only)
 Entry:  low crosses back above discount_k band (crossover)
         AND ADX < 25  (range-bound regime)
         AND RSI <= 50 (neutral-to-oversold close confirms the bounce)
-Exit:   Trail stop (Jason McIntosh), TP, hard SL, or band exit
-        Band: high drops above premium_k band (mirrors entry logic)
+Exit:   Liquidation, TP, hard SL, or band exit (LONG only; trail stop disabled)
+        Band: high rises above premium_k band (mirrors entry logic)
 """
 
 from .utils.data_structures import (

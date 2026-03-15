@@ -5,7 +5,6 @@ Run:   python gui.py
 Build: python build.py --gui
 """
 
-import csv
 import json
 import logging
 import os
@@ -1231,8 +1230,8 @@ class App(ctk.CTk):
         # Silently resets the database if the on-disk schema is out of date
         # (e.g. after a code upgrade that added new columns).
         from engine.utils.db_logger import validate_or_reset_db
-        was_reset = validate_or_reset_db(C.DB_PATH)
-        if not was_reset:
+        schema_ok = validate_or_reset_db(C.DB_PATH)
+        if not schema_ok:
             messagebox.showinfo(
                 "Database Reset",
                 "The trading database was out of date and has been reset.\n"
