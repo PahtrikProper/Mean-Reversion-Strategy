@@ -649,10 +649,12 @@ class BybitPrivateClient:
             "timeInForce": "IOC",
             "orderLinkId": link_id,
         }
-        if CATEGORY == "spot":
-            # isLeverage=1 activates spot margin borrowing on Bybit Unified account
+        if CATEGORY == "spot" and side.lower() == "buy":
+            # isLeverage=1 activates spot margin borrowing (LONG entry only).
+            # Must NOT be sent on Sell (exit) orders — would enable short-selling,
+            # violating the LONG-only constraint of this strategy.
             body["isLeverage"] = "1"
-        else:
+        elif CATEGORY != "spot":
             body["positionIdx"] = 0
             body["reduceOnly"] = reduce_only
         j = rest_request("POST", "/v5/order/create", body=body, auth=True)

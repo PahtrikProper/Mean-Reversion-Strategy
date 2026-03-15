@@ -33,7 +33,7 @@ class TradeRecord:
     exit_fee:        float
     pnl_gross:       float
     pnl_net:         float
-    reason:          str           # "TP", "TIME_TP", "TRAIL_STOP", "STOP_LOSS", "BAND_EXIT"
+    reason:          str           # "TP", "TIME_TP", "STOP_LOSS", "BAND_EXIT", "LIQUIDATED"
     wallet_at_entry: float = 0.0
     hold_candles:    int   = 0     # candles held from entry to exit
     entry_ts_ms:     int   = 0     # candle open timestamp at entry (ms since epoch)
@@ -135,7 +135,7 @@ class ExitParams:
     trail_pct:      float = TRAIL_STOP_PCT         # McIntosh trailing stop % below highest high (0 = off)
     exit_ma_len:    int   = DEFAULT_EXIT_MA_LEN    # RMA period for discount (exit) band centre line
     exit_band_mult: float = DEFAULT_EXIT_BAND_MULT # exit band width multiplier (%)
-    leverage:       float = DEFAULT_LEVERAGE       # position leverage (fixed 1× for spot)
+    leverage:       float = DEFAULT_LEVERAGE       # position leverage (2–10× for spot margin; optimised)
 
 
 @dataclass
