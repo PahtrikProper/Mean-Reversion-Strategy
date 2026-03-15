@@ -28,12 +28,12 @@ SLIPPAGE_TICKS = 1
 TICK_SIZE      = 0.0001      # for slippage simulation
 
 # ── Live TP scaling ───────────────────────────────────────────────────────────
-# 1.0 = live TP matches backtested TP exactly (entry * (1 - tp_pct) for SHORT).
+# 1.0 = live TP matches backtested TP exactly (entry * (1 + tp_pct) for LONG).
 # tp_pct is a raw price-move fraction.
 LIVE_TP_SCALE = 1.0
 
 # ── Time-based TP tightening ─────────────────────────────────────────────────
-# If a SHORT position is still open after TIME_TP_HOURS, the TP is overridden
+# If a LONG position is still open after TIME_TP_HOURS, the TP is overridden
 # with a data-driven tighter target so the trade exits sooner.
 # The new TP = avg(top-3 highest-PnL 20h+ exits) × TIME_TP_SCALE.
 # Falls back to TIME_TP_FALLBACK_PCT when fewer than 3 qualifying trades exist.
@@ -50,7 +50,7 @@ DEFAULT_TP_PCT         = 0.003  # 0.30% take-profit (default; now also optimised
 
 # ── Entry gate defaults (also optimised at runtime) ───────────────────────────
 ADX_THRESHOLD   = 25.0  # ADX must be below this for entry (range-bound regime)
-RSI_NEUTRAL_LO  = 50.0  # RSI must be >= this at candle close (overbought confirmation for SHORT)
+RSI_NEUTRAL_LO  = 50.0  # RSI must be <= this at candle close (oversold confirmation for LONG)
 BAND_EMA_LENGTH = 5     # EMA smoothing period applied to all 8 premium/discount bands
 ADX_PERIOD      = 14    # Wilder's ADX calculation period (optimised at runtime; default 14)
 RSI_PERIOD      = 14    # Wilder's RSI calculation period (optimised at runtime; default 14)
@@ -62,14 +62,15 @@ RSI_PERIOD      = 14    # Wilder's RSI calculation period (optimised at runtime;
 # almost never fires; making it a search dim would add noise without signal.
 VOL_FILTER_MAX_PCT = 0.05   # 5% of candle USDT volume
 
-# ── Hard stop-loss (SHORT exit) ───────────────────────────────────────────────
-# Fires when: current_high >= entry_price * (1 + sl_pct)
+# ── Hard stop-loss (LONG exit) ────────────────────────────────────────────────
+# Fires when: current_low <= entry_price * (1 - sl_pct)
 # Intentionally wide — designed as a last-resort guard before liquidation.
 # Optimised alongside TP.
-STOP_LOSS_PCT = 0.05     # default 5.0% above entry (optimised at runtime)
+STOP_LOSS_PCT = 0.05     # default 5.0% below entry (optimised at runtime)
 
-# ── Trailing stop — disabled for SHORT mean-reversion ─────────────────────────
-# Set to 0.0 — SHORT mean-reversion exits via TP, SL, or band exit.
+# ── Trailing stop — not yet implemented ───────────────────────────────────────
+# Set to 0.0 — exits via TP, SL, or band exit.
+# When non-zero, would trail the LONG at max_high * (1 - trail_pct).
 TRAIL_STOP_PCT = 0.0
 
 # ── Optimiser search ranges ───────────────────────────────────────────────────
@@ -132,7 +133,7 @@ OPT_LEVERAGE_MIN    = 2
 OPT_LEVERAGE_MAX    = 10
 
 # Spot margin maintenance margin rate (Bybit default ~0.5%)
-# Used to compute the liquidation price: liq = entry × (lev-1) / (lev × (1 - MMR))
+# Used to compute the LONG liquidation price: liq = entry × (lev-1) / (lev × (1 - MMR))
 SPOT_MARGIN_MMR     = 0.005
 
 # Backtest window per trial (days; fixed at 5 for fast spot optimisation)

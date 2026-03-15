@@ -1,4 +1,4 @@
-"""Backtesting Engine — Mean Reversion Strategy (SHORT spot margin)
+"""Backtesting Engine — Mean Reversion Strategy (LONG spot margin)
 
 Uses LAST-price OHLCV for all signal generation (bands, ADX gate, RSI gate, TP, SL).
 Spot margin trading: position qty is scaled by leverage; liquidation is checked on
@@ -6,15 +6,15 @@ each candle before other exits.  A liquidated result is flagged so the optimizer
 discards that parameter set.
 
 Entry:
-    high drops back below premium_k band (band crossover)
+    low bounces back above discount_k band (band crossover)
     AND ADX < 25  (range-bound regime)
-    AND RSI >= 50 (neutral-to-overbought close confirms the fade)
+    AND RSI <= 50 (neutral-to-oversold close confirms the dip)
 
 Exit priority per candle:
-  1. Liquidation  (last high >= liq_price = entry * (lev+1) / (lev * (1+MMR)))
-  2. Take-profit  (last low  <= tp_price = entry * (1 - tp_pct))               [fixed TP, optimised]
-  3. Stop-Loss    (last high >= entry * (1 + sl_pct))                          [wide guard before liq]
-  4. Band exit    (last low drops below discount_k band)                        [mirrors entry logic]
+  1. Liquidation  (last low  <= liq_price = entry * (lev-1) / (lev * (1-MMR)))
+  2. Take-profit  (last high >= tp_price = entry * (1 + tp_pct))               [fixed TP, optimised]
+  3. Stop-Loss    (last low  <= entry * (1 - sl_pct))                          [wide guard before liq]
+  4. Band exit    (last high rises above premium_k band)                        [mirrors entry logic]
 """
 
 import pandas as pd
@@ -55,7 +55,7 @@ def backtest_once(
     time_tp_pct: float = 0.0,
     interval_minutes_bt: int = 5,
 ) -> Optional[BacktestResult]:
-    """Backtest Mean Reversion Strategy (SHORT spot margin).
+    """Backtest Mean Reversion Strategy (LONG spot margin).
 
     Args:
         df_last_raw:         Last-price OHLCV (ts, open, high, low, close, volume)
@@ -110,7 +110,7 @@ def backtest_once(
     entry_fee            = 0.0
     wallet_at_entry      = 0.0
     in_position          = False
-    _liq_price_bt        = 0.0   # spot margin SHORT liquidation price (0 = no position)
+    _liq_price_bt        = 0.0   # spot margin LONG liquidation price (0 = no position)
     _was_liquidated      = False  # true if any trade hit liquidation
 
     # Time-based TP tightening — tracks when entry occurred and whether applied
@@ -140,10 +140,10 @@ def backtest_once(
         if in_position and pos_qty != 0.0:
             qty_abs = abs(pos_qty)
 
-            # 1. Liquidation check (spot margin SHORT — high rises to liq price)
-            if _liq_price_bt > 0 and high_last >= _liq_price_bt:
+            # 1. Liquidation check (spot margin LONG — low falls to liq price)
+            if _liq_price_bt > 0 and low_last <= _liq_price_bt:
                 fill      = _liq_price_bt
-                pnl_gross = (entry_price_bt - fill) * qty_abs
+                pnl_gross = (fill - entry_price_bt) * qty_abs
                 exit_fee  = (qty_abs * fill) * fee_rate
                 wallet    = max(0.0, wallet + pnl_gross - exit_fee)
                 pnl_net   = pnl_gross - entry_fee - exit_fee
@@ -151,7 +151,7 @@ def backtest_once(
                 _exit_ts_raw = dfl.iloc[i]["ts"]
                 _exit_ts_ms  = int(_exit_ts_raw.value) // 1_000_000 if hasattr(_exit_ts_raw, "value") else int(_exit_ts_raw)
                 trade_records.append(TradeRecord(
-                    side="SHORT", entry_price=entry_price_bt, exit_price=fill,
+                    side="LONG", entry_price=entry_price_bt, exit_price=fill,
                     qty=qty_abs, entry_fee=entry_fee, exit_fee=exit_fee,
                     pnl_gross=pnl_gross, pnl_net=pnl_net,
                     reason="LIQUIDATED", wallet_at_entry=wallet_at_entry,
@@ -165,7 +165,7 @@ def backtest_once(
                 _was_liquidated = True
                 exited = True
 
-            # 2. Take-profit (price moves DOWN to TP target)
+            # 2. Take-profit (price moves UP to TP target)
             # After TIME_TP_HOURS of hold, switch to the tighter time-based TP.
             if not exited and pos_qty != 0.0:
                 _active_tp_pct = float(exit_params.tp_pct)
@@ -174,10 +174,10 @@ def backtest_once(
                         and (i - entry_candle_idx) >= _time_tp_candles):
                     time_tp_applied = True
                     _active_tp_pct  = time_tp_pct
-                tp_price = entry_price_bt * (1.0 - _active_tp_pct)
-                if low_last <= tp_price:
-                    fill      = apply_slippage(tp_price, "buy")
-                    pnl_gross = (entry_price_bt - fill) * qty_abs
+                tp_price = entry_price_bt * (1.0 + _active_tp_pct)
+                if high_last >= tp_price:
+                    fill      = apply_slippage(tp_price, "sell")
+                    pnl_gross = (fill - entry_price_bt) * qty_abs
                     exit_fee  = (qty_abs * fill) * fee_rate
                     wallet   += pnl_gross - exit_fee
                     pnl_net   = pnl_gross - entry_fee - exit_fee
@@ -185,7 +185,7 @@ def backtest_once(
                     _exit_ts_raw = dfl.iloc[i]["ts"]
                     _exit_ts_ms  = int(_exit_ts_raw.value) // 1_000_000 if hasattr(_exit_ts_raw, "value") else int(_exit_ts_raw)
                     trade_records.append(TradeRecord(
-                        side="SHORT", entry_price=entry_price_bt, exit_price=fill,
+                        side="LONG", entry_price=entry_price_bt, exit_price=fill,
                         qty=qty_abs, entry_fee=entry_fee, exit_fee=exit_fee,
                         pnl_gross=pnl_gross, pnl_net=pnl_net,
                         reason="TIME_TP" if time_tp_applied else "TP",
@@ -199,12 +199,12 @@ def backtest_once(
                     _liq_price_bt = 0.0
                     exited = True
 
-            # 3. Hard stop-loss (price rises above entry * (1 + sl_pct))
+            # 3. Hard stop-loss (price falls below entry * (1 - sl_pct))
             if not exited and pos_qty != 0.0:
-                sl_price = entry_price_bt * (1.0 + float(exit_params.sl_pct))
-                if high_last >= sl_price:
-                    fill      = apply_slippage(close, "buy")
-                    pnl_gross = (entry_price_bt - fill) * qty_abs
+                sl_price = entry_price_bt * (1.0 - float(exit_params.sl_pct))
+                if low_last <= sl_price:
+                    fill      = apply_slippage(close, "sell")
+                    pnl_gross = (fill - entry_price_bt) * qty_abs
                     exit_fee  = (qty_abs * fill) * fee_rate
                     wallet   += pnl_gross - exit_fee
                     pnl_net   = pnl_gross - entry_fee - exit_fee
@@ -212,7 +212,7 @@ def backtest_once(
                     _exit_ts_raw = dfl.iloc[i]["ts"]
                     _exit_ts_ms  = int(_exit_ts_raw.value) // 1_000_000 if hasattr(_exit_ts_raw, "value") else int(_exit_ts_raw)
                     trade_records.append(TradeRecord(
-                        side="SHORT", entry_price=entry_price_bt, exit_price=fill,
+                        side="LONG", entry_price=entry_price_bt, exit_price=fill,
                         qty=qty_abs, entry_fee=entry_fee, exit_fee=exit_fee,
                         pnl_gross=pnl_gross, pnl_net=pnl_net,
                         reason="STOP_LOSS", wallet_at_entry=wallet_at_entry,
@@ -225,15 +225,15 @@ def backtest_once(
                     _liq_price_bt = 0.0
                     exited = True
 
-            # 4. Band exit (low drops below discount_k — mirrors premium band entry)
+            # 4. Band exit (high rises above premium_k — mirrors discount band entry)
             if not exited and pos_qty != 0.0:
                 _raw_exit = compute_exit_signals_raw(
                     current_row=row, prev_row=prev,
-                    current_low=low_last,
+                    current_high=high_last,
                 )
                 if _raw_exit > 0:
-                    fill      = apply_slippage(close, "buy")
-                    pnl_gross = (entry_price_bt - fill) * qty_abs
+                    fill      = apply_slippage(close, "sell")
+                    pnl_gross = (fill - entry_price_bt) * qty_abs
                     exit_fee  = (qty_abs * fill) * fee_rate
                     wallet   += pnl_gross - exit_fee
                     pnl_net   = pnl_gross - entry_fee - exit_fee
@@ -241,7 +241,7 @@ def backtest_once(
                     _exit_ts_raw = dfl.iloc[i]["ts"]
                     _exit_ts_ms  = int(_exit_ts_raw.value) // 1_000_000 if hasattr(_exit_ts_raw, "value") else int(_exit_ts_raw)
                     trade_records.append(TradeRecord(
-                        side="SHORT", entry_price=entry_price_bt, exit_price=fill,
+                        side="LONG", entry_price=entry_price_bt, exit_price=fill,
                         qty=qty_abs, entry_fee=entry_fee, exit_fee=exit_fee,
                         pnl_gross=pnl_gross, pnl_net=pnl_net,
                         reason="BAND_EXIT",
@@ -257,13 +257,13 @@ def backtest_once(
 
         # ── Entry ─────────────────────────────────────────────────────────────
         if not exited and not in_position and wallet > 0.0:
-            _raw_short = compute_entry_signals_raw(
+            _raw_long = compute_entry_signals_raw(
                 current_row=row, prev_row=prev,
-                current_high=high_last,
+                current_low=low_last,
             )
             _rsi_val = float(row["rsi"]) if not pd.isna(row["rsi"]) else 100.0
             if resolve_entry_signals(
-                _raw_short, float(row["adx"]), _rsi_val,
+                _raw_long, float(row["adx"]), _rsi_val,
                 adx_threshold=entry_params.adx_threshold,
                 rsi_neutral_lo=entry_params.rsi_neutral_lo,
             ) > 0:
@@ -274,16 +274,16 @@ def backtest_once(
                 if _candle_usdt_vol > 0 and (_pos_notional / _candle_usdt_vol) > VOL_FILTER_MAX_PCT:
                     pass  # insufficient liquidity — skip entry
                 else:
-                    fill            = apply_slippage(close, "sell")
+                    fill            = apply_slippage(close, "buy")
                     wallet_at_entry = wallet
-                    # Spot margin SHORT: qty scaled by leverage; margin committed = wallet * fraction
+                    # Spot margin LONG: qty scaled by leverage; margin committed = wallet * fraction
                     notional        = wallet * MAX_SYMBOL_FRACTION * leverage_bt
                     qty             = notional / fill
                     fee             = notional * maker_fee_rate
                     wallet         -= fee
-                    # Liquidation price for SHORT: margin runs out when price rises by ~1/leverage
-                    # liq = entry × (leverage+1) / (leverage × (1 + MMR))
-                    _liq_price_bt   = fill * (leverage_bt + 1.0) / (leverage_bt * (1.0 + SPOT_MARGIN_MMR))
+                    # Liquidation price for LONG: margin runs out when price falls by ~1/leverage
+                    # liq = entry × (leverage-1) / (leverage × (1 - MMR))
+                    _liq_price_bt   = fill * (leverage_bt - 1.0) / (leverage_bt * (1.0 - SPOT_MARGIN_MMR))
                     pos_qty              = qty
                     entry_price_bt       = fill
                     entry_fee            = fee
@@ -299,9 +299,9 @@ def backtest_once(
         if in_position and entry_candle_idx == i and not exited:
             qty_abs_sb = abs(pos_qty)
             # 1. Liquidation (same-bar)
-            if _liq_price_bt > 0 and high_last >= _liq_price_bt:
+            if _liq_price_bt > 0 and low_last <= _liq_price_bt:
                 fill      = _liq_price_bt
-                pnl_gross = (entry_price_bt - fill) * qty_abs_sb
+                pnl_gross = (fill - entry_price_bt) * qty_abs_sb
                 exit_fee  = (qty_abs_sb * fill) * fee_rate
                 wallet    = max(0.0, wallet + pnl_gross - exit_fee)
                 pnl_net   = pnl_gross - entry_fee - exit_fee
@@ -309,7 +309,7 @@ def backtest_once(
                 _exit_ts_raw = dfl.iloc[i]["ts"]
                 _exit_ts_ms  = int(_exit_ts_raw.value) // 1_000_000 if hasattr(_exit_ts_raw, "value") else int(_exit_ts_raw)
                 trade_records.append(TradeRecord(
-                    side="SHORT", entry_price=entry_price_bt, exit_price=fill,
+                    side="LONG", entry_price=entry_price_bt, exit_price=fill,
                     qty=qty_abs_sb, entry_fee=entry_fee, exit_fee=exit_fee,
                     pnl_gross=pnl_gross, pnl_net=pnl_net,
                     reason="LIQUIDATED", wallet_at_entry=wallet_at_entry,
@@ -321,12 +321,12 @@ def backtest_once(
                 _liq_price_bt = 0.0
                 _was_liquidated = True
                 exited = True
-            # 2. Take-profit (same-bar low)
+            # 2. Take-profit (same-bar high)
             if not exited and pos_qty != 0.0:
-                _sb_tp_price = entry_price_bt * (1.0 - float(exit_params.tp_pct))
-                if low_last <= _sb_tp_price:
-                    fill      = apply_slippage(_sb_tp_price, "buy")
-                    pnl_gross = (entry_price_bt - fill) * qty_abs_sb
+                _sb_tp_price = entry_price_bt * (1.0 + float(exit_params.tp_pct))
+                if high_last >= _sb_tp_price:
+                    fill      = apply_slippage(_sb_tp_price, "sell")
+                    pnl_gross = (fill - entry_price_bt) * qty_abs_sb
                     exit_fee  = (qty_abs_sb * fill) * fee_rate
                     wallet   += pnl_gross - exit_fee
                     pnl_net   = pnl_gross - entry_fee - exit_fee
@@ -334,7 +334,7 @@ def backtest_once(
                     _exit_ts_raw = dfl.iloc[i]["ts"]
                     _exit_ts_ms  = int(_exit_ts_raw.value) // 1_000_000 if hasattr(_exit_ts_raw, "value") else int(_exit_ts_raw)
                     trade_records.append(TradeRecord(
-                        side="SHORT", entry_price=entry_price_bt, exit_price=fill,
+                        side="LONG", entry_price=entry_price_bt, exit_price=fill,
                         qty=qty_abs_sb, entry_fee=entry_fee, exit_fee=exit_fee,
                         pnl_gross=pnl_gross, pnl_net=pnl_net,
                         reason="TP", wallet_at_entry=wallet_at_entry,
@@ -345,12 +345,12 @@ def backtest_once(
                     entry_candle_idx = 0; time_tp_applied = False
                     _liq_price_bt = 0.0
                     exited = True
-            # 3. Stop-loss (same-bar high)
+            # 3. Stop-loss (same-bar low)
             if not exited and pos_qty != 0.0:
-                sl_price_sb = entry_price_bt * (1.0 + float(exit_params.sl_pct))
-                if high_last >= sl_price_sb:
-                    fill      = apply_slippage(close, "buy")
-                    pnl_gross = (entry_price_bt - fill) * qty_abs_sb
+                sl_price_sb = entry_price_bt * (1.0 - float(exit_params.sl_pct))
+                if low_last <= sl_price_sb:
+                    fill      = apply_slippage(close, "sell")
+                    pnl_gross = (fill - entry_price_bt) * qty_abs_sb
                     exit_fee  = (qty_abs_sb * fill) * fee_rate
                     wallet   += pnl_gross - exit_fee
                     pnl_net   = pnl_gross - entry_fee - exit_fee
@@ -358,7 +358,7 @@ def backtest_once(
                     _exit_ts_raw = dfl.iloc[i]["ts"]
                     _exit_ts_ms  = int(_exit_ts_raw.value) // 1_000_000 if hasattr(_exit_ts_raw, "value") else int(_exit_ts_raw)
                     trade_records.append(TradeRecord(
-                        side="SHORT", entry_price=entry_price_bt, exit_price=fill,
+                        side="LONG", entry_price=entry_price_bt, exit_price=fill,
                         qty=qty_abs_sb, entry_fee=entry_fee, exit_fee=exit_fee,
                         pnl_gross=pnl_gross, pnl_net=pnl_net,
                         reason="STOP_LOSS", wallet_at_entry=wallet_at_entry,
@@ -372,11 +372,11 @@ def backtest_once(
             # 4. Band exit (same-bar signal)
             if not exited and pos_qty != 0.0:
                 _raw_exit_sb = compute_exit_signals_raw(
-                    current_row=row, prev_row=prev, current_low=low_last,
+                    current_row=row, prev_row=prev, current_high=high_last,
                 )
                 if _raw_exit_sb > 0:
-                    fill      = apply_slippage(close, "buy")
-                    pnl_gross = (entry_price_bt - fill) * qty_abs_sb
+                    fill      = apply_slippage(close, "sell")
+                    pnl_gross = (fill - entry_price_bt) * qty_abs_sb
                     exit_fee  = (qty_abs_sb * fill) * fee_rate
                     wallet   += pnl_gross - exit_fee
                     pnl_net   = pnl_gross - entry_fee - exit_fee
@@ -384,7 +384,7 @@ def backtest_once(
                     _exit_ts_raw = dfl.iloc[i]["ts"]
                     _exit_ts_ms  = int(_exit_ts_raw.value) // 1_000_000 if hasattr(_exit_ts_raw, "value") else int(_exit_ts_raw)
                     trade_records.append(TradeRecord(
-                        side="SHORT", entry_price=entry_price_bt, exit_price=fill,
+                        side="LONG", entry_price=entry_price_bt, exit_price=fill,
                         qty=qty_abs_sb, entry_fee=entry_fee, exit_fee=exit_fee,
                         pnl_gross=pnl_gross, pnl_net=pnl_net,
                         reason="BAND_EXIT", wallet_at_entry=wallet_at_entry,
@@ -398,7 +398,7 @@ def backtest_once(
 
         # ── Equity snapshot ───────────────────────────────────────────────────
         if pos_qty != 0.0:
-            wallet_history.append(wallet + (entry_price_bt - close) * abs(pos_qty))
+            wallet_history.append(wallet + (close - entry_price_bt) * abs(pos_qty))
         else:
             wallet_history.append(wallet)
 
