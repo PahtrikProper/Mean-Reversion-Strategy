@@ -79,7 +79,7 @@ def _make_app():
     async def ready():
         return JSONResponse({"ready": _db_is_ready()})
 
-    # ── REST: historical candles + bands ──────────────────────────────────────
+    # ── REST: historical candles + bands + indicators ─────────────────────────
     @app.get("/api/history")
     async def history(symbol: str = "XRPUSDT", interval: str = "5", limit: int = 10000):
         try:
@@ -91,6 +91,7 @@ def _make_app():
                     c.open, c.high, c.low, c.close,
                     c.volume,
                     a.ma,
+                    a.adx, a.rsi,
                     a.premium_1,  a.premium_2,  a.premium_3,  a.premium_4,
                     a.premium_5,  a.premium_6,  a.premium_7,  a.premium_8,
                     a.discount_1, a.discount_2, a.discount_3, a.discount_4,
@@ -120,7 +121,7 @@ def _make_app():
             conn = _get_conn()
             rows = conn.execute(
                 """
-                SELECT ts_utc, action, side, fill_price, qty, pnl_net, result, mode
+                SELECT ts_utc, action, reason, side, fill_price, qty, pnl_net, result, mode
                 FROM   trades
                 WHERE  symbol = ? AND interval = ?
                 ORDER  BY ts_utc DESC
@@ -132,6 +133,36 @@ def _make_app():
             return JSONResponse([dict(r) for r in rows])
         except Exception as exc:
             log.error("trades error: %s", exc)
+            return JSONResponse({"error": str(exc)}, status_code=500)
+
+    # ── REST: latest strategy params (for threshold reference lines) ───────────
+    @app.get("/api/params")
+    async def params(symbol: str = "XRPUSDT", interval: str = "5"):
+        try:
+            conn = _get_conn()
+            row = conn.execute(
+                """
+                SELECT adx_threshold, rsi_neutral_lo, ma_len, band_mult,
+                       exit_ma_len, exit_band_mult, leverage, tp_pct, sl_pct
+                FROM   params
+                WHERE  symbol = ? AND interval = ?
+                ORDER  BY ts_utc DESC
+                LIMIT  1
+                """,
+                (symbol, interval),
+            ).fetchone()
+            conn.close()
+            if row:
+                return JSONResponse(dict(row))
+            # Fallback defaults if no params in DB yet
+            return JSONResponse({
+                "adx_threshold": 25, "rsi_neutral_lo": 50,
+                "ma_len": 100, "band_mult": 2.5,
+                "exit_ma_len": 100, "exit_band_mult": 2.5,
+                "leverage": 3, "tp_pct": 0.20, "sl_pct": 0.40,
+            })
+        except Exception as exc:
+            log.error("params error: %s", exc)
             return JSONResponse({"error": str(exc)}, status_code=500)
 
     # ── REST: available (symbol, interval) pairs ───────────────────────────────
@@ -183,7 +214,7 @@ def _make_app():
                     SELECT
                         c.ts_ms AS time,
                         c.open, c.high, c.low, c.close, c.volume,
-                        a.ma,
+                        a.ma, a.adx, a.rsi,
                         a.premium_1,  a.premium_2,  a.premium_3,  a.premium_4,
                         a.premium_5,  a.premium_6,  a.premium_7,  a.premium_8,
                         a.discount_1, a.discount_2, a.discount_3, a.discount_4,
@@ -204,7 +235,7 @@ def _make_app():
                 # ── New live trades only (not backtest) ────────────────────────
                 new_trades = conn.execute(
                     """
-                    SELECT id, ts_utc, action, fill_price, result, mode
+                    SELECT id, ts_utc, action, reason, fill_price, result, mode
                     FROM   trades
                     WHERE  symbol=? AND interval=? AND id > ? AND mode != 'backtest'
                     ORDER  BY id
