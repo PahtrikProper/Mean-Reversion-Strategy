@@ -95,16 +95,16 @@ class EntryParams:
     """Mean Reversion entry parameters.
 
     Entry fires when:
-        low crosses back above discount_k band (crossunder of band below low)
+        high drops back below premium_k band (band crossover)
         AND ADX < adx_threshold (range-bound regime; default 25)
-        AND RSI <= rsi_neutral_lo (neutral-to-oversold close confirms the bounce; default 50)
+        AND RSI >= rsi_neutral_lo (neutral-to-overbought close confirms the fade; default 50)
 
     All seven fields are optimised at runtime by the random-search optimizer.
     """
     ma_len:         int   = DEFAULT_MA_LEN    # RMA period for band centre line
     band_mult:      float = DEFAULT_BAND_MULT # Band width multiplier (%)
     adx_threshold:  float = ADX_THRESHOLD     # Max ADX for entry (range-bound gate)
-    rsi_neutral_lo: float = RSI_NEUTRAL_LO    # Max RSI at close (oversold confirmation)
+    rsi_neutral_lo: float = RSI_NEUTRAL_LO    # Min RSI at close (overbought confirmation)
     band_ema_len:   int   = BAND_EMA_LENGTH   # EMA smoothing on all 8 premium/discount bands
     adx_period:     int   = ADX_PERIOD        # Wilder's ADX calculation period (optimised)
     rsi_period:     int   = RSI_PERIOD        # Wilder's RSI calculation period (optimised)
@@ -112,28 +112,23 @@ class EntryParams:
 
 @dataclass
 class ExitParams:
-    """Mean Reversion exit parameters.
+    """Mean Reversion exit parameters (SHORT spot margin).
 
     Exit fires on (full system priority order):
-        1. Trail Stop:  low  <= highest_high_since_entry * (1 - trail_pct)  [Jason McIntosh; 0 = off]
-        2. TP:          high >= entry * (1 + tp_pct)                  [optimised]
-        3. Stop-Loss:   low  <= entry * (1 - sl_pct)                  [optimised; hard floor]
-        4. Band:        high crosses above premium_k band              [independent exit-band params]
+        1. Liquidation: high >= entry * (leverage+1) / (leverage * (1+MMR))
+        2. TP:          low  <= entry * (1 - tp_pct)                  [optimised]
+        3. Stop-Loss:   high >= entry * (1 + sl_pct)                  [wide guard before liq]
+        4. Band:        low  drops below discount_k band               [independent exit-band params]
 
-    trail_pct implements the Jason McIntosh trailing stop: the stop level tracks
-    the highest candle-high since entry and never moves down.  It protects
-    unrealised profit as price rises, while the hard SL remains the floor.
+    trail_pct is set to 0.0 — SHORT mean-reversion exits via TP, SL, or band exit.
 
-    SL is intentionally wide (default 5%) — intended to protect the account,
-    not to be routinely triggered.  Optimised alongside TP so the backtest
-    finds the right balance.
+    SL is intentionally wide (default 5%) — designed to guard against large adverse
+    moves before liquidation, not to be routinely triggered.  Optimised alongside TP.
 
-    exit_ma_len / exit_band_mult control the premium bands used for the band
-    exit signal.  These are optimised independently from the entry (discount)
+    exit_ma_len / exit_band_mult control the discount bands used for the band
+    exit signal.  These are optimised independently from the entry (premium)
     band params (EntryParams.ma_len / band_mult), allowing the system to find
     different sensitivity for exiting vs entering.
-
-    leverage is fixed at 1× for spot trading — no leverage, no liquidation.
     """
     tp_pct:         float = DEFAULT_TP_PCT         # take-profit fraction (e.g. 0.0028 = 0.28%)
     sl_pct:         float = STOP_LOSS_PCT          # hard stop-loss fraction below entry (e.g. 0.05 = 5.0%)
@@ -146,11 +141,11 @@ class ExitParams:
 @dataclass
 class RealPosition:
     """Snapshot of the live Bybit position fetched via REST."""
-    qty:         float    # positive for LONG spot position
+    qty:         float    # positive for SHORT spot margin position (borrowed qty sold)
     entry_price: float
-    side:        str      # "Buy" (spot LONG entry)
+    side:        str      # "Sell" (spot SHORT entry)
     entry_time:  Optional[object] = None  # pd.Timestamp of entry (tracked locally)
-    liq_price:   Optional[float]  = None  # always None for spot (no liquidation)
+    liq_price:   Optional[float]  = None  # liquidation price (above entry for SHORT)
 
 
 @dataclass

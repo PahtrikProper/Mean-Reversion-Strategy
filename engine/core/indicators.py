@@ -1,16 +1,16 @@
 """Mean Reversion Strategy — Indicator Calculations
 
-Entry (LONG only):
-  1. Build discount bands: main = RMA(close, ma_len),
-     discount_k = EMA(main * (1 - band_mult% * k), 5),  k in 1..8
-  2. Raw signal: low[prev] <= discount_k[prev]  AND  low[now] > discount_k[now]
-     (low bounces back above discount band after touching/crossing below it)
-  3. Gates: ADX < 25 (range-bound market) AND RSI <= 50 (neutral-to-oversold close)
+Entry (SHORT only):
+  1. Build premium bands: main = RMA(close, ma_len),
+     premium_k = EMA(main * (1 + band_mult% * k), 5),  k in 1..8
+  2. Raw signal: high[prev] >= premium_k[prev]  AND  high[now] < premium_k[now]
+     (high drops back below premium band after touching/exceeding it)
+  3. Gates: ADX < 25 (range-bound market) AND RSI >= 50 (neutral-to-overbought close)
 
 Exit:
-  TP:          high >= entry * (1 + tp_pct)
-  Stop-Loss:   low  <= entry * (1 - sl_pct)   [wide guard]
-  Band exit:   high drops below premium_k band (mirrors entry logic on premium side)
+  TP:          low  <= entry * (1 - tp_pct)
+  Stop-Loss:   high >= entry * (1 + sl_pct)   [wide, pre-liquidation guard]
+  Band exit:   low  drops below discount_k band (mirrors entry logic on discount side)
 """
 
 import pandas as pd
@@ -170,8 +170,8 @@ def calculate_adx(df: pd.DataFrame, period: int = ADX_PERIOD) -> np.ndarray:
 def calculate_rsi(df: pd.DataFrame, period: int = RSI_PERIOD) -> np.ndarray:
     """Calculate RSI using Wilder's method.
 
-    RSI < 30 = oversold (confirms LONG entry)
-    RSI > 50 = close above neutral — blocks LONG (price not confirmed oversold at close)
+    RSI > 70 = overbought (confirms SHORT fade)
+    RSI < 50 = close below neutral — blocks SHORT (price not confirmed overbought at close)
 
     Returns array aligned with df rows; first value is np.nan (lost due to diff).
     """
@@ -230,9 +230,9 @@ def build_indicators(
 
     Adds:
         main           — RMA(close, ma_len)                              (entry centre line)
-        premium_1..8   — EMA-smoothed premium bands   (exit signals;   uses exit_ma_len + exit_band_mult
+        premium_1..8   — EMA-smoothed premium bands   (entry signals;  uses ma_len + band_mult)
+        discount_1..8  — EMA-smoothed discount bands  (exit signals;   uses exit_ma_len + exit_band_mult
                           when provided, otherwise falls back to ma_len + band_mult)
-        discount_1..8  — EMA-smoothed discount bands  (entry signals;  uses ma_len + band_mult)
         adx            — ADX(adx_period) Wilder (entry gate)
         rsi            — RSI(rsi_period) Wilder (entry gate)
 
@@ -278,60 +278,61 @@ def crossunder(a_prev: float, a_cur: float, b_prev: float, b_cur: float) -> bool
 # ─── Raw entry signal (band crossover scan) ─────────────────────────────────────
 
 def compute_entry_signals_raw(
-    current_row,    # dict or Series: must contain discount_1..8 and "low"
-    prev_row,       # dict or Series: must contain discount_1..8 and "low"
-    current_low: float,
+    current_row,    # dict or Series: must contain premium_1..8 and "high"
+    prev_row,       # dict or Series: must contain premium_1..8 and "high"
+    current_high: float,
 ) -> int:
-    """Scan discount bands 8→1 for LONG entry signals.
+    """Scan premium bands 8→1 for SHORT entry signals.
 
     Signal fires when:
-      price low bounces back ABOVE discount band
-      (i.e. prev_low <= prev_band  AND  curr_low > curr_band)
+      premium_band crosses ABOVE price high
+      (i.e. prev_high >= prev_band  AND  curr_high < curr_band)
+      → HIGH touched/exceeded the premium zone then fell back; fade the move.
 
     Returns 0 (no signal) or band level 1-8 that triggered (highest wins).
-    Higher level = price was more extended below mean = stronger bounce setup.
+    Higher level = price was more extended above mean = stronger fade setup.
     """
     for band_level in range(8, 0, -1):
-        key = f"discount_{band_level}"
+        key = f"premium_{band_level}"
         if crossover(
-            float(prev_row["low"]),    # a_prev = prev candle low
-            current_low,               # a_cur  = current candle low
-            float(prev_row[key]),      # b_prev = prev discount band value
-            float(current_row[key]),   # b_cur  = current discount band value
+            float(prev_row[key]),      # a_prev = prev band value
+            float(current_row[key]),   # a_cur  = current band value
+            float(prev_row["high"]),   # b_prev = prev candle high
+            current_high,              # b_cur  = current candle high
         ):
             return band_level
     return 0
 
 
-# ─── Raw exit signal (premium band crossunder scan — mirror of entry) ───────────
+# ─── Raw exit signal (discount band crossover scan — mirror of entry) ───────────
 
 def compute_exit_signals_raw(
-    current_row,    # dict or Series: must contain premium_1..8 and "high"
-    prev_row,       # dict or Series: must contain premium_1..8 and "high"
-    current_high: float,
+    current_row,    # dict or Series: must contain discount_1..8 and "low"
+    prev_row,       # dict or Series: must contain discount_1..8 and "low"
+    current_low: float,
 ) -> int:
-    """Scan premium bands 8→1 for LONG exit signals.
+    """Scan discount bands 8→1 for SHORT exit signals.
 
-    Exact mirror of compute_entry_signals_raw, applied to premium bands + HIGH:
-        Entry: LOW  bounces above discount_k  → LONG (oversold bounce)
-        Exit:  HIGH drops back below premium_k → CLOSE LONG (overextended upside)
+    Exact mirror of compute_entry_signals_raw, applied to discount bands + LOW:
+        Entry: HIGH drops back below premium_k  → SHORT (overextended upside)
+        Exit:  LOW  drops back below discount_k → CLOSE SHORT (mean reversion complete)
 
     Signal fires when:
-        premium_band crosses ABOVE price high
-        (i.e. prev_high >= prev_premium  AND  curr_high < curr_premium)
-        → HIGH entered the premium zone then fell back; price has reverted enough to exit.
+        discount_band crosses ABOVE price low
+        (i.e. prev_low >= prev_discount  AND  curr_low < curr_discount)
+        → LOW has entered the discount zone; price has reverted enough to exit.
 
     Scans 8→1 (most extended first). Returns 0 (no signal) or band level 1-8.
-    Higher level = larger move in our favor = more extended premium zone touch.
+    Higher level = larger move in our favor = more extended discount zone touch.
     No gates applied — exits are unconditional on band signal.
     """
     for band_level in range(8, 0, -1):
-        key = f"premium_{band_level}"
+        key = f"discount_{band_level}"
         if crossover(
-            float(prev_row[key]),      # a_prev = prev premium band value
-            float(current_row[key]),   # a_cur  = current premium band value
-            float(prev_row["high"]),   # b_prev = prev candle high
-            current_high,              # b_cur  = current candle high
+            float(prev_row[key]),      # a_prev = prev discount band value
+            float(current_row[key]),   # a_cur  = current discount band value
+            float(prev_row["low"]),    # b_prev = prev candle low
+            current_low,               # b_cur  = current candle low
         ):
             return band_level
     return 0
@@ -340,7 +341,7 @@ def compute_exit_signals_raw(
 # ─── Signal quality gates ────────────────────────────────────────────────────────
 
 def resolve_entry_signals(
-    raw_long: int,
+    raw_short: int,
     adx: float,
     rsi: float,
     adx_threshold: float = ADX_THRESHOLD,
@@ -349,10 +350,10 @@ def resolve_entry_signals(
     """Apply ADX and RSI gates to filter raw band-crossover entry signals.
 
     Gate 1 — ADX regime (checked first):
-        ADX >= adx_threshold → trending market → block ALL LONG entries
+        ADX >= adx_threshold → trending market → block ALL SHORT entries
     Gate 2 — RSI confirmation:
-        RSI > rsi_neutral_lo → close above neutral → block LONG (close must confirm
-                    oversold; don't buy a bounce where the candle already closed strongly)
+        RSI < rsi_neutral_lo → close below neutral → block SHORT (close must confirm
+                    overbought; don't fade a move where the candle already closed weakly)
 
     adx_threshold and rsi_neutral_lo default to the module-level constants but can be
     overridden per-trial by the optimizer for parameter search.
@@ -364,13 +365,13 @@ def resolve_entry_signals(
         return 0
 
     # Gate 2: RSI confirmation
-    final_long = raw_long
-    if final_long != 0 and rsi > rsi_neutral_lo:
-        final_long = 0
+    final_short = raw_short
+    if final_short != 0 and rsi < rsi_neutral_lo:
+        final_short = 0
 
-    return final_long
+    return final_short
 
 
 # Note: is_exit_signal (ADX/SMA-based) has been removed.
-# Exits now use compute_exit_signals_raw (premium band crossovers), mirroring
-# how compute_entry_signals_raw uses discount band crossovers for entries.
+# Exits now use compute_exit_signals_raw (discount band crossovers), mirroring
+# how compute_entry_signals_raw uses premium band crossovers for entries.

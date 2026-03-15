@@ -28,12 +28,12 @@ SLIPPAGE_TICKS = 1
 TICK_SIZE      = 0.0001      # for slippage simulation
 
 # ── Live TP scaling ───────────────────────────────────────────────────────────
-# 1.0 = live TP matches backtested TP exactly (entry * (1 + tp_pct) for LONG).
+# 1.0 = live TP matches backtested TP exactly (entry * (1 - tp_pct) for SHORT).
 # tp_pct is a raw price-move fraction.
 LIVE_TP_SCALE = 1.0
 
 # ── Time-based TP tightening ─────────────────────────────────────────────────
-# If a LONG position is still open after TIME_TP_HOURS, the TP is overridden
+# If a SHORT position is still open after TIME_TP_HOURS, the TP is overridden
 # with a data-driven tighter target so the trade exits sooner.
 # The new TP = avg(top-3 highest-PnL 20h+ exits) × TIME_TP_SCALE.
 # Falls back to TIME_TP_FALLBACK_PCT when fewer than 3 qualifying trades exist.
@@ -50,7 +50,7 @@ DEFAULT_TP_PCT         = 0.003  # 0.30% take-profit (default; now also optimised
 
 # ── Entry gate defaults (also optimised at runtime) ───────────────────────────
 ADX_THRESHOLD   = 25.0  # ADX must be below this for entry (range-bound regime)
-RSI_NEUTRAL_LO  = 50.0  # RSI must be <= this at candle close (oversold confirmation for LONG)
+RSI_NEUTRAL_LO  = 50.0  # RSI must be >= this at candle close (overbought confirmation for SHORT)
 BAND_EMA_LENGTH = 5     # EMA smoothing period applied to all 8 premium/discount bands
 ADX_PERIOD      = 14    # Wilder's ADX calculation period (optimised at runtime; default 14)
 RSI_PERIOD      = 14    # Wilder's RSI calculation period (optimised at runtime; default 14)
@@ -62,19 +62,15 @@ RSI_PERIOD      = 14    # Wilder's RSI calculation period (optimised at runtime;
 # almost never fires; making it a search dim would add noise without signal.
 VOL_FILTER_MAX_PCT = 0.05   # 5% of candle USDT volume
 
-# ── Hard stop-loss (LONG exit) ────────────────────────────────────────────────
-# Fires when: current_low <= entry_price * (1 - sl_pct)
-# Intentionally wide — designed as a last-resort guard, not routinely triggered.
+# ── Hard stop-loss (SHORT exit) ───────────────────────────────────────────────
+# Fires when: current_high >= entry_price * (1 + sl_pct)
+# Intentionally wide — designed as a last-resort guard before liquidation.
 # Optimised alongside TP.
-STOP_LOSS_PCT = 0.05     # default 5.0% below entry (optimised at runtime)
+STOP_LOSS_PCT = 0.05     # default 5.0% above entry (optimised at runtime)
 
-# ── Jason McIntosh trailing stop ──────────────────────────────────────────────
-# Tracks the highest candle-high since LONG entry.
-# Trail fires when: current_low <= highest_high_since_entry * (1 - TRAIL_STOP_PCT)
-# The trail level only rises — it never moves down.
-# Priority: highest — fires before TP and hard stop-loss.
-# Set to 0.0 to disable.
-TRAIL_STOP_PCT = 0.02    # 2.0% trailing stop below the highest high since entry
+# ── Trailing stop — disabled for SHORT mean-reversion ─────────────────────────
+# Set to 0.0 — SHORT mean-reversion exits via TP, SL, or band exit.
+TRAIL_STOP_PCT = 0.0
 
 # ── Optimiser search ranges ───────────────────────────────────────────────────
 INIT_TRIALS          = 4000
