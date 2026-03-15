@@ -93,6 +93,7 @@ def _apply_config(cfg: dict) -> None:
     if "days_back_seed"   in cfg: C.DAYS_BACK_SEED      = int(cfg["days_back_seed"])
     C.CANDLE_INTERVALS = ["5"]    # fixed — 5m only
     if "risk_pct"         in cfg: C.MAX_SYMBOL_FRACTION  = float(cfg["risk_pct"])
+    if "leverage"         in cfg: C.DEFAULT_LEVERAGE     = float(cfg["leverage"])
     if "optimizer" in cfg:
         if "n_trials" in cfg["optimizer"]:
             C.INIT_TRIALS = int(cfg["optimizer"]["n_trials"])
@@ -773,6 +774,34 @@ class App(ctk.CTk):
             font=ctk.CTkFont(size=13), text_color="#8b949e",
         ).grid(row=5, column=1, columnspan=3, padx=(0, 14), pady=(0, 12), sticky="w")
 
+        # ── Leverage row ──────────────────────────────────────────────────────
+        ctk.CTkLabel(
+            self._risk_body, text="Leverage:",
+            font=ctk.CTkFont(size=13), text_color="#c9d1d9",
+        ).grid(row=6, column=0, padx=(14, 8), pady=(0, 12), sticky="w")
+
+        _lev_options = [str(v) for v in C.OPT_LEVERAGE_VALUES]
+        self._lev_var = ctk.StringVar(value=str(int(C.DEFAULT_LEVERAGE)))
+        self._lev_menu = ctk.CTkOptionMenu(
+            self._risk_body,
+            values=_lev_options,
+            variable=self._lev_var,
+            width=90,
+        )
+        self._lev_menu.grid(row=6, column=1, padx=(0, 8), pady=(0, 12))
+
+        self._btn_apply_lev = ctk.CTkButton(
+            self._risk_body, text="Apply", width=80,
+            command=self._apply_leverage,
+        )
+        self._btn_apply_lev.grid(row=6, column=2, padx=(0, 14), pady=(0, 12), sticky="w")
+
+        self._lbl_lev_status = ctk.CTkLabel(
+            self._risk_body, text=f"Current: {int(C.DEFAULT_LEVERAGE)}×",
+            text_color="#8b949e", font=ctk.CTkFont(size=12),
+        )
+        self._lbl_lev_status.grid(row=6, column=3, padx=14, pady=(0, 12), sticky="w")
+
 
         # ── Controls ──────────────────────────────────────────────────────────
         ctrl = ctk.CTkFrame(self._scroll, fg_color="#161b22", corner_radius=8)
@@ -1208,6 +1237,19 @@ class App(ctk.CTk):
             text_color="#3fb950",
         )
 
+    def _apply_leverage(self) -> None:
+        try:
+            lev = int(self._lev_var.get().strip())
+        except ValueError:
+            return
+        lev = max(C.OPT_LEVERAGE_MIN, min(C.OPT_LEVERAGE_MAX, lev))
+        C.DEFAULT_LEVERAGE = float(lev)
+        _save_config({"leverage": lev})
+        self._lbl_lev_status.configure(
+            text=f"Current: {lev}×",
+            text_color="#3fb950",
+        )
+
 
     # ── Bot controls ──────────────────────────────────────────────────────────
     def _start_bot(self) -> None:
@@ -1241,6 +1283,8 @@ class App(ctk.CTk):
         self._btn_apply_risk.configure(state="disabled")
         self._tests_menu.configure(state="disabled")
         self._btn_apply_tests.configure(state="disabled")
+        self._lev_menu.configure(state="disabled")
+        self._btn_apply_lev.configure(state="disabled")
         self._prog_outer.grid()
         self._prog_bar.set(0)
 
@@ -1405,6 +1449,8 @@ class App(ctk.CTk):
             self._btn_apply_risk.configure(state="normal")
             self._tests_menu.configure(state="normal")
             self._btn_apply_tests.configure(state="normal")
+            self._lev_menu.configure(state="normal")
+            self._btn_apply_lev.configure(state="normal")
             self._set_status("idle")
             self._lbl_ctrl_msg.configure(text="Ready to start")
             self._prog_outer.grid_remove()
