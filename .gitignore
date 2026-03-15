@@ -1,0 +1,26 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Claude Code local settings (API key lives in ~/.claude/ — never in repo)
+.claude/
+!.claude/agents/
+!.claude/agents/**
+
+# Runtime data — trading DB, best params, logs (local only, never commit)
+data/
+paper_logs/
+*.log
+
+# macOS / build artefacts
+.DS_Store
+dist/
+build/
+*.egg-info/
+
+# Secrets / credentials (should never exist in repo, listed as extra safety net)
+.env
+*.env
+bybit_credentials.json
+credentials.json

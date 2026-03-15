@@ -1,0 +1,24 @@
+{
+  "_comment": "Mean Reversion \u2014 default strategy configuration",
+  "symbol": "XRPUSDT",
+  "interval": "5",
+  "days_back_seed": 30,
+  "leverage": 3.0,
+  "starting_wallet": 100.0,
+  "fee_rate": 0.00055,
+  "maker_fee_rate": 0.0002,
+  "entry": {
+    "_comment": "Entry: low crosses above discount_k band AND ADX<25 AND RSI<=50",
+    "ma_len": 100,
+    "band_mult": 2.5
+  },
+  "exit": {
+    "_comment": "Exit: TP, hard SL, or band exit (no trailing stop; TRAIL_STOP_PCT=0.0)",
+    "tp_pct": 0.003
+  },
+  "optimizer": {
+    "n_trials": 4000,
+    "min_trades": 1
+  },
+  "risk_pct": 0.8
+}
