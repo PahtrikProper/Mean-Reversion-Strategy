@@ -2,7 +2,7 @@
   "_comment": "Mean Reversion \u2014 default strategy configuration",
   "symbol": "XRPUSDT",
   "interval": "5",
-  "days_back_seed": 5,
+  "days_back_seed": 30,
   "leverage": 3.0,
   "starting_wallet": 100.0,
   "fee_rate": 0.00055,

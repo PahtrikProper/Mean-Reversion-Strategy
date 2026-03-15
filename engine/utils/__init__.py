@@ -6,7 +6,7 @@ from .data_structures import (
     RealPosition, PendingSignal,
 )
 from .position_gate import PositionGate
-from .logger import log_order, ensure_csv, csv_append
+from .logger import log_order
 from .plotting import plot_pnl_chart, print_monte_carlo_report
 from .helpers import (
     interval_minutes, supported_intervals,
@@ -22,7 +22,7 @@ __all__ = [
     "TradeRecord", "BacktestResult", "MCSimResult",
     "EntryParams", "ExitParams",
     "RealPosition", "PendingSignal", "PositionGate",
-    "log_order", "ensure_csv", "csv_append",
+    "log_order",
     "plot_pnl_chart", "print_monte_carlo_report",
     "interval_minutes", "supported_intervals",
     "leverage_for", "fee_for", "taker_fee_for", "maker_fee_for", "now_ms",

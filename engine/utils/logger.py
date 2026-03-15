@@ -3,7 +3,6 @@
 All persistent logging goes to SQLite via db_logger.
 This module provides:
   - log_order(): coloured console output + SQLite write
-  - csv_append() / ensure_csv(): no-ops kept for import compatibility
 """
 
 import logging
@@ -83,13 +82,3 @@ def log_order(
         order_id=order_id, reason=reason, error=error,
         signal_side=signal_side, signal_level=signal_level,
     )
-
-
-def ensure_csv(path, header):
-    """No-op — CSV files are no longer written; everything goes to SQLite."""
-    pass
-
-
-def csv_append(path, row):
-    """No-op — CSV files are no longer written; everything goes to SQLite."""
-    pass
