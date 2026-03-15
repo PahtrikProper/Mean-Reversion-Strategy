@@ -87,20 +87,18 @@ resolve_entry_signals(raw_long, adx, rsi) -> int
 | Priority | Exit Type | Trigger | Notes |
 |----------|-----------|---------|-------|
 | 0 | **Liquidation** | low <= liq_price | Spot margin LONG formula: `entry × (lev−1) / (lev × (1−MMR))`; checked first in backtest, detected via position=None in live |
-| 1 | **Trail Stop** | low <= highest_high × (1 − trail_pct) | Jason McIntosh trail; tracks highest candle-high since entry; `TRAIL_STOP_PCT = 0.02` (2.0%), fixed constant, never optimised; 0.0 = disabled |
-| 2 | **Take-Profit** | high >= entry × (1 + tp_pct) | Server-side TP in live (Bybit LastPrice trigger); direct check in backtest. After `TIME_TP_HOURS` (20 h) the tighter **data-driven TP** is substituted — reason logged as `TIME_TP` vs `TP` |
-| 3 | **Stop-Loss** | low <= entry × (1 − sl_pct) | Hard floor guard — wide (default 5%), optimised alongside TP |
-| 4 | **Band Exit** | premium band crossover-above-high | Mirror of entry signal applied to premium bands + high |
+| 1 | **Take-Profit** | high >= entry × (1 + tp_pct) | Server-side TP in live (Bybit LastPrice trigger); direct check in backtest. After `TIME_TP_HOURS` (20 h) the tighter **data-driven TP** is substituted — reason logged as `TIME_TP` vs `TP` |
+| 2 | **Stop-Loss** | low <= entry × (1 − sl_pct) | Hard floor guard — wide (default 5%), optimised alongside TP |
+| 3 | **Band Exit** | premium band crossover-above-high | Mirror of entry signal applied to premium bands + high |
 
-**This priority order is fixed.** It is implemented identically in the backtester (`backtester.py`), paper trader (`paper_trader.py`), and live trader (`live_trader.py`).
+**This priority order is fixed.** It is implemented identically in the backtester (`backtester.py`) and live trader (`live_trader.py`). Paper trading is handled within `live_trader.py`.
 
 ### Same-Bar Exit Recalculation ("After order is filled")
 
 After an entry fires on bar N, all four exit conditions are immediately re-evaluated on the **same bar N** before advancing to bar N+1. This matches TradingView's "Recalculate: After order is filled" execution model.
 
-- **Backtester**: full 5-priority pass using bar N's `low_last`, `high_last`; `hold_candles = 0` for same-bar exits
-- **Paper trader**: same 5-priority chain re-checked immediately after `_execute_entry()` returns
-- **Live trader**: trail stop, SL and band exit re-checked immediately after `_execute_entry()` (TP is server-side and liquidation is detected via `_handle_external_close` on the next candle)
+- **Backtester**: full 4-priority pass using bar N's `low_last`, `high_last`; `hold_candles = 0` for same-bar exits
+- **Live trader**: SL and band exit re-checked immediately after `_execute_entry()` (TP is server-side and liquidation is detected when position disappears on the next candle)
 
 This behaviour is gated by `entry_candle_idx == i` (backtester) and `self.position is not None` after `_execute_entry` (paper/live).
 
@@ -150,7 +148,7 @@ compute_exit_signals_raw(current_row, prev_row, current_low, current_high) -> in
 
 | Constant | Value | Location |
 |----------|-------|----------|
-| `TRAIL_STOP_PCT` | 2.0 % | `constants.py` — trailing stop fires when low <= highest_high × (1 − 0.02); set to 0.0 to disable |
+| `TRAIL_STOP_PCT` | 0.0 % (disabled) | `constants.py` — trailing stop is disabled; exits use TP, SL, and band exit only |
 | `SPOT_MARGIN_MMR` | 0.5 % | `constants.py` — maintenance margin rate used in liquidation price formula |
 | `VOL_FILTER_MAX_PCT` | 5.0 % | `constants.py` — skip entry if position notional > 5% of candle USDT volume |
 | `LIVE_TP_SCALE` | 1.0 | `constants.py` — server TP matches backtested distance exactly |
@@ -167,7 +165,7 @@ compute_exit_signals_raw(current_row, prev_row, current_low, current_high) -> in
 
 `LIVE_TP_SCALE`: set to 1.0 — the server-side TP is placed at exactly the backtested distance (no scaling offset).
 
-`SLIPPAGE_TICKS`: applied to all simulated (paper / backtest) fills via `apply_slippage()` in `orders.py`. SHORT entry (sell) receives `price - tick`; cover exit (buy) receives `price + tick`. Live fills rely on Bybit execution.
+`SLIPPAGE_TICKS`: applied to all simulated (paper / backtest) fills via `apply_slippage()` in `orders.py`. LONG entry (buy) receives `price + tick` (worse fill = higher price); LONG exit (sell) receives `price - tick` (worse fill = lower price). Live fills rely on Bybit execution.
 
 ---
 
@@ -281,8 +279,8 @@ Paper trading uses `PaperTrader` (`paper_trader.py`) instead of `LiveRealTrader`
 ## Key Invariants — Do Not Change Without Explicit Instruction
 
 1. **LONG only.** No short entries. No flip logic.
-2. **Exit priority is fixed**: Liquidation → Trail Stop → TP → Stop-Loss → Band. This must be identical in `backtester.py`, `paper_trader.py`, and `live_trader.py`. The same-bar re-check after entry must preserve the same priority order.
-3. **Trail stop + hard stop-loss.** `TRAIL_STOP_PCT` (2.0%) is a fixed constant, never optimised. `sl_pct` is optimised alongside `tp_pct` as a hard-floor guard below the trail.
+2. **Exit priority is fixed**: Liquidation → TP → Stop-Loss → Band. This must be identical in `backtester.py` and `live_trader.py`. The same-bar re-check after entry must preserve the same priority order. Trail stop is disabled (`TRAIL_STOP_PCT = 0.0`).
+3. **Hard stop-loss only.** `TRAIL_STOP_PCT` is 0.0 (disabled) — trailing stop is not implemented. `sl_pct` is optimised alongside `tp_pct` as a wide hard-floor guard before liquidation.
 4. **Band EMA length is optimised (2–15).** `band_ema_len` is a search dimension, not a fixed constant.
 5. **ADX threshold (20–28), RSI threshold (40–60), ADX period (7–21), and RSI period (7–21) are all optimised.** Do not treat them as fixed constants.
 6. **The optimiser sorts internally by (n_losses ASC, return_pct DESC).** Pair selection uses `pnl_pct / (1 + max_drawdown_pct)`. Do not conflate these two scoring steps.
@@ -309,7 +307,7 @@ Paper trading uses `PaperTrader` (`paper_trader.py`) instead of `LiveRealTrader`
 | `engine/backtest/backtester.py` | Historical backtest engine; single run and Monte Carlo |
 | `engine/optimize/optimizer.py` | Random-search optimiser over the 12-parameter space; `optimise_bayesian` is an alias for `optimise_params`; 30-day rolling windows; volume filter |
 | `engine/trading/live_trader.py` | Live trading engine: WebSocket candle processing, entry/exit execution, re-optimisation |
-| `engine/trading/paper_trader.py` | Paper trading engine: simulates fills, fees, slippage, liquidation locally using public data |
+| `engine/trading/live_trader.py` (paper mode) | Paper trading: simulates fills, fees, slippage, and liquidation locally using public data when `--paper` flag is set |
 | `engine/trading/bybit_client.py` | Bybit REST + WebSocket client, order placement, execution polling |
 | `engine/utils/api_key_prompt.py` | Interactive API credential setup with hidden input; saves/loads `~/.bybit_credentials.json` |
 | `engine/utils/constants.py` | All configuration constants and defaults |

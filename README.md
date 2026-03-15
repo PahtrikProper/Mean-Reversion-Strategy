@@ -333,12 +333,11 @@ The bot enters long when price touches a discount band below the RMA centre line
 | # | Type | Trigger |
 |---|------|---------|
 | 0 | Liquidation | low ≤ liq_price — spot margin LONG formula: `entry × (lev−1) / (lev × (1−MMR))` |
-| 1 | Trail Stop | low ≤ highest_high_since_entry × (1 − trail_pct) — Jason McIntosh trail (2.0%, fixed) |
-| 2 | Take-Profit | high ≥ entry × (1 + tp_pct) |
-| 3 | Stop-Loss | low ≤ entry × (1 − sl_pct) — wide guard (default 5%) |
-| 4 | Band Exit | high drops below a premium band (mirrors entry logic on the premium side) |
+| 1 | Take-Profit | high ≥ entry × (1 + tp_pct) |
+| 2 | Stop-Loss | low ≤ entry × (1 − sl_pct) — wide guard (default 5%) |
+| 3 | Band Exit | high crosses above a premium band (mirrors entry logic on the premium side) |
 
-In **live** mode, TP is handled server-side by Bybit; trail stop, stop-loss, and band exits are checked on every closed candle. In **paper** mode, all five exits are simulated locally. Slippage (1 tick) is applied to all simulated fills.
+In **live** mode, TP is handled server-side by Bybit; stop-loss and band exits are checked on every closed candle. In **paper** mode, all four exits are simulated locally. Slippage (1 tick) is applied to all simulated fills. Trail stop is disabled (`TRAIL_STOP_PCT = 0.0`).
 
 ### TradingView Execution Model
 
@@ -348,7 +347,7 @@ The bot uses the same execution model as TradingView's strategy tester with thes
 - **On every tick** — intrabar high/low are used for TP, SL, and liquidation checks
 - **Recalculate: After order is filled** — after an entry fires on bar N, all four exit conditions are immediately re-evaluated on the same bar N before advancing to bar N+1
 
-The "after order is filled" same-bar re-check is implemented identically in the backtester, paper trader, and live trader.
+The "after order is filled" same-bar re-check is implemented identically in the backtester and live trader.
 
 The optimiser searches **12 parameters** — entry MA length, entry band multiplier, ADX threshold, RSI threshold, band EMA length, ADX period, RSI period, exit MA length, exit band multiplier, TP %, SL %, and leverage — and re-runs every **12 hours** in a background thread so live candle processing is never blocked. Each trial uses a random 5–30-day slice of the 30-day seeded dataset to prevent window overfitting. A volume filter (5% of candle USDT volume) vetoes entries on thin candles. All (symbol, interval) pairs are ranked by `score = PnL% / (1 + max_drawdown%)` and the top-ranked pair per symbol is selected for trading.
 
