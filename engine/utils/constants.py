@@ -148,9 +148,12 @@ SPOT_MARGIN_MMR     = 0.005
 #   borrowed_usdt = notional × (leverage - 1) / leverage
 BORROW_HOURLY_RATE  = 0.0001   # 0.01% per hour (default fallback)
 
-# Backtest window per trial — fixed at 30 days to match the full seed window
-OPT_MIN_DAYS        = 30
-OPT_MAX_DAYS        = 30
+# Backtest window per trial — fixed 5-day windows with random offsets across
+# the 30-day seed.  Each of the 4000 trials sees a different 5-day slice,
+# so the optimizer tests params across many market regimes rather than
+# overfitting to one continuous block.
+OPT_MIN_DAYS        = 5
+OPT_MAX_DAYS        = 5
 
 OPT_N_RANDOM          = INIT_TRIALS
 OPT_MIN_TRADES_PER_DAY = 1.0   # discard any trial with < 1 trade/day on average

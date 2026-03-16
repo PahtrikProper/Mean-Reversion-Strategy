@@ -15,8 +15,8 @@ trail_pct is searched in OPT_TRAIL_X10000_MIN–OPT_TRAIL_X10000_MAX
 adx_period / rsi_period searched in OPT_ADX/RSI_PERIOD_MIN–MAX (7–21).
 leverage searched in OPT_LEVERAGE_VALUES (spot margin: 2×, 3×, 4×, 8×, 10×).
 
-Per-trial backtest window: fixed 30 days, random start offset within the
-seeded dataset.
+Per-trial backtest window: fixed 5 days, random start offset within the
+30-day seeded dataset — each trial sees a different market slice.
 All windows generated upfront before threads are spawned (RNG is not thread-safe).
 
 Uses randomised search with exploitation/exploration split:
