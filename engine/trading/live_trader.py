@@ -738,6 +738,7 @@ class LiveRealTrader:
                             saved_best=saved_best,
                             borrow_hourly_rate=_live_borrow_rate,
                             db_symbol=sym, db_interval=iv, db_trigger="REOPT",
+                            fixed_leverage=C.DEFAULT_LEVERAGE,
                         )
 
                         br = opt["best_result"]

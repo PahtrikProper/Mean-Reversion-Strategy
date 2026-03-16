@@ -110,6 +110,7 @@ def optimise_params(
     db_interval: Optional[str] = None,
     db_trigger: str = "STARTUP",
     borrow_hourly_rate: float = BORROW_HOURLY_RATE,
+    fixed_leverage: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Random search over 12 dimensions:
       (ma_len, band_mult, trail_pct, exit_ma_len, exit_band_mult,
@@ -134,6 +135,11 @@ def optimise_params(
     total_candles = len(dfl)
 
     rng = np.random.default_rng(RANDOM_SEED)
+
+    # Snap fixed_leverage to nearest valid value; None means optimise freely
+    _fixed_lev: Optional[int] = None
+    if fixed_leverage is not None:
+        _fixed_lev = int(min(OPT_LEVERAGE_VALUES, key=lambda v: abs(v - fixed_leverage)))
 
     # ── Build combo list + per-trial random windows ────────────────────────────
     n_exploit = int(trials * EXPLOIT_RATIO) if saved_best else 0
@@ -222,10 +228,13 @@ def optimise_params(
                 rng.integers(b_rsi_period - EXPLOIT_RSI_PERIOD_RADIUS,
                              b_rsi_period + EXPLOIT_RSI_PERIOD_RADIUS + 1),
                 OPT_RSI_PERIOD_MIN, OPT_RSI_PERIOD_MAX))
-            _b_lev_idx = OPT_LEVERAGE_VALUES.index(b_lev)
-            _lo = max(0, _b_lev_idx - EXPLOIT_LEVERAGE_RADIUS)
-            _hi = min(len(OPT_LEVERAGE_VALUES) - 1, _b_lev_idx + EXPLOIT_LEVERAGE_RADIUS)
-            lev_int    = int(OPT_LEVERAGE_VALUES[int(rng.integers(_lo, _hi + 1))])
+            if _fixed_lev is not None:
+                lev_int = _fixed_lev
+            else:
+                _b_lev_idx = OPT_LEVERAGE_VALUES.index(b_lev)
+                _lo = max(0, _b_lev_idx - EXPLOIT_LEVERAGE_RADIUS)
+                _hi = min(len(OPT_LEVERAGE_VALUES) - 1, _b_lev_idx + EXPLOIT_LEVERAGE_RADIUS)
+                lev_int = int(OPT_LEVERAGE_VALUES[int(rng.integers(_lo, _hi + 1))])
             key = (ma, bm_x10, trail_x10000, exit_ma, exit_bm_x10,
                    adx_int, rsi_lo_int, band_ema, adx_period, rsi_period, lev_int)
             if key not in seen:
@@ -246,7 +255,7 @@ def optimise_params(
         band_ema     = int(rng.integers(OPT_BAND_EMA_MIN,           OPT_BAND_EMA_MAX           + 1))
         adx_period   = int(rng.integers(OPT_ADX_PERIOD_MIN,         OPT_ADX_PERIOD_MAX         + 1))
         rsi_period   = int(rng.integers(OPT_RSI_PERIOD_MIN,         OPT_RSI_PERIOD_MAX         + 1))
-        lev_int      = int(OPT_LEVERAGE_VALUES[int(rng.integers(0, len(OPT_LEVERAGE_VALUES)))])
+        lev_int      = _fixed_lev if _fixed_lev is not None else int(OPT_LEVERAGE_VALUES[int(rng.integers(0, len(OPT_LEVERAGE_VALUES)))])
         key = (ma, bm_x10, trail_x10000, exit_ma, exit_bm_x10,
                adx_int, rsi_lo_int, band_ema, adx_period, rsi_period, lev_int)
         if key not in seen:
@@ -265,7 +274,10 @@ def optimise_params(
               f"(TP fixed={DEFAULT_TP_PCT*100:.0f}%  SL fixed={STOP_LOSS_PCT*100:.0f}%)")
         print(f"  ExitBand — MA-len {OPT_EXIT_MA_LEN_MIN}-{OPT_EXIT_MA_LEN_MAX}  "
               f"BandMult {OPT_EXIT_BAND_MULT_X10_MIN/10:.1f}-{OPT_EXIT_BAND_MULT_X10_MAX/10:.1f}%")
-        print(f"  Leverage — {OPT_LEVERAGE_VALUES} (spot margin)")
+        if _fixed_lev is not None:
+            print(f"  Leverage — {_fixed_lev}× (fixed by GUI setting)")
+        else:
+            print(f"  Leverage — {OPT_LEVERAGE_VALUES} (optimised)")
         print(f"  Window   — {OPT_MIN_DAYS} days (fixed)")
         if saved_best:
             print(f"  Mode: {n_exploit} exploitation + {len(combos)-n_exploit} exploration")

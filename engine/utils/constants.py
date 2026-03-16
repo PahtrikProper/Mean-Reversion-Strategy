@@ -131,10 +131,9 @@ OPT_ADX_PERIOD_MAX  = 28
 OPT_RSI_PERIOD_MIN  = 5
 OPT_RSI_PERIOD_MAX  = 28
 
-# Leverage — discrete spot margin values tested by the optimizer
-# Bybit spot margin supports: 2×, 3×, 4×, 8×, 10×
-OPT_LEVERAGE_VALUES = [2, 3, 4, 8, 10]
-OPT_LEVERAGE_MIN    = 2
+# Leverage — full 1–10 range available in GUI and optimizer
+OPT_LEVERAGE_VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+OPT_LEVERAGE_MIN    = 1
 OPT_LEVERAGE_MAX    = 10
 
 # Spot margin maintenance margin rate (Bybit default ~0.5%)
