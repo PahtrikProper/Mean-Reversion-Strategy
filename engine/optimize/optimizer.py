@@ -15,15 +15,17 @@ trail_pct is searched in OPT_TRAIL_X10000_MIN–OPT_TRAIL_X10000_MAX
 adx_period / rsi_period searched in OPT_ADX/RSI_PERIOD_MIN–MAX (7–21).
 leverage searched in OPT_LEVERAGE_VALUES (spot margin: 2×, 3×, 4×, 8×, 10×).
 
-Per-trial backtest window: fixed 5 days, random start offset within the
-30-day seeded dataset.
+Per-trial backtest window: fixed 30 days, random start offset within the
+seeded dataset.
 All windows generated upfront before threads are spawned (RNG is not thread-safe).
 
 Uses randomised search with exploitation/exploration split:
-  EXPLOIT_RATIO of trials are sampled near the previously saved best params.
-  The remainder are fully random within the configured search space.
+  EXPLOIT_RATIO (0.35) of trials sample near the previously saved best params
+  with doubled radii to avoid replaying identical results each re-opt.
+  The remainder (0.65) are fully random within the configured search space.
 
-Scoring: sort by (n_losses ASC, return_pct DESC) — fewest losing trades first.
+Scoring: sort by (n_losses ASC, sharpe DESC, return_pct DESC) — fewest losing
+trades first, then highest Sharpe ratio, then highest total return.
 """
 
 import numpy as np
@@ -123,7 +125,7 @@ def optimise_params(
           "entry_params": EntryParams,
           "exit_params":  ExitParams,
           "best_result":  BacktestResult,
-          "all_results":  list of result dicts sorted by (n_losses ASC, return_pct DESC)
+          "all_results":  list of result dicts sorted by (n_losses ASC, sharpe DESC, return_pct DESC)
         }
     Raises RuntimeError if no valid runs found.
     """
@@ -420,8 +422,10 @@ def optimise_params(
     if not results:
         raise RuntimeError("Optimiser: no valid runs found (insufficient data or no trades)")
 
-    # Sort: fewest losing trades first; break ties by highest return
-    results.sort(key=lambda r: (r["n_losses"], -r["return_pct"]))
+    # Sort: fewest losing trades → highest Sharpe → highest return
+    # Sharpe as first tiebreaker avoids picking a zero-loss run that just had
+    # a huge single winner; Sharpe penalises variance and rewards consistency.
+    results.sort(key=lambda r: (r["n_losses"], -r["sharpe"], -r["return_pct"]))
     best = results[0]
 
     best_entry = EntryParams(

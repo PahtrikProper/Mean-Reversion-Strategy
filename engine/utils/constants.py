@@ -81,7 +81,7 @@ HARD_SL_PAUSE_HOURS = 6.0
 
 # ── Optimiser search ranges ───────────────────────────────────────────────────
 INIT_TRIALS          = 4000
-REOPT_INTERVAL_SEC   = 12 * 60 * 60  # re-optimise every 12 hours
+REOPT_INTERVAL_SEC   = 4 * 60 * 60   # re-optimise every 4 hours (faster adaptation)
 
 # Entry — MA length (RMA period for premium band centre line)
 OPT_MA_LEN_MIN        = 2
@@ -159,18 +159,22 @@ OPT_MIN_TRADES        = 1      # absolute floor (kept for very short windows)
 RANDOM_SEED       = None     # set int for reproducible runs
 
 # Exploitation: sample near saved best params
-EXPLOIT_RATIO                     = 0.60
-EXPLOIT_MA_LEN_RADIUS             = 15
-EXPLOIT_BAND_MULT_RADIUS_X10      = 3    # ±0.3 around saved best entry band_mult
-EXPLOIT_TRAIL_RADIUS_X10000       = 20   # ±0.20% around saved best trail_pct
-EXPLOIT_EXIT_MA_LEN_RADIUS        = 15
-EXPLOIT_EXIT_BAND_MULT_RADIUS_X10 = 3    # ±0.3 around saved best exit band_mult
-EXPLOIT_ADX_RADIUS                = 5    # ±5 around saved best ADX threshold (range 15–55)
-EXPLOIT_RSI_LO_RADIUS             = 7    # ±7 around saved best RSI neutral-low (range 30–70)
-EXPLOIT_BAND_EMA_RADIUS           = 3    # ±3 around saved best band EMA length (range 2–25)
-EXPLOIT_ADX_PERIOD_RADIUS         = 3    # ±3 around saved best ADX period (range 5–28)
-EXPLOIT_RSI_PERIOD_RADIUS         = 3    # ±3 around saved best RSI period (range 5–28)
-EXPLOIT_LEVERAGE_RADIUS           = 1    # explore ±1 step in OPT_LEVERAGE_VALUES list
+# Ratio reduced to 0.35 so 65% of trials explore freely — prevents the
+# optimizer from replaying the same narrow ball around saved_best every run.
+EXPLOIT_RATIO                     = 0.35
+# Radii doubled from originals so exploitation genuinely explores alternatives
+# rather than just confirming the same params with different random seeds.
+EXPLOIT_MA_LEN_RADIUS             = 30   # was 15
+EXPLOIT_BAND_MULT_RADIUS_X10      = 8    # was 3  — ±0.8% across a 0.3–3.0% range
+EXPLOIT_TRAIL_RADIUS_X10000       = 60   # was 20 — ±0.60% trail range
+EXPLOIT_EXIT_MA_LEN_RADIUS        = 30   # was 15
+EXPLOIT_EXIT_BAND_MULT_RADIUS_X10 = 8    # was 3
+EXPLOIT_ADX_RADIUS                = 10   # was 5  — ±10 across a 15–55 range
+EXPLOIT_RSI_LO_RADIUS             = 15   # was 7  — ±15 across a 30–70 range
+EXPLOIT_BAND_EMA_RADIUS           = 6    # was 3  — ±6 across a 2–25 range
+EXPLOIT_ADX_PERIOD_RADIUS         = 6    # was 3  — ±6 across a 5–28 range
+EXPLOIT_RSI_PERIOD_RADIUS         = 6    # was 3  — ±6 across a 5–28 range
+EXPLOIT_LEVERAGE_RADIUS           = 2    # was 1  — ±2 steps in OPT_LEVERAGE_VALUES
 
 # ── Runtime behaviour ─────────────────────────────────────────────────────────
 KEEP_CANDLES            = 3000
