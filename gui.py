@@ -305,6 +305,33 @@ class _BotController:
         if self._poller:
             self._poller.stop()
 
+    def _watchdog(self, traders: Dict[str, Any]) -> None:
+        """Monitor REST connectivity. If _refresh_failed stays True for
+        REST_FAIL_THRESHOLD seconds, emit a watchdog_restart and stop the bot
+        so the GUI can auto-restart with a fresh process state."""
+        REST_FAIL_THRESHOLD = 10 * 60  # 10 minutes
+        fail_since: Optional[float] = None
+
+        while not self._stop.wait(30):   # wakes immediately if stop is set
+            if self._stop.is_set():
+                break
+            any_failed = any(
+                getattr(t, "_refresh_failed", False) for t in traders.values()
+            )
+            if any_failed:
+                if fail_since is None:
+                    fail_since = time.time()
+                    self._log("⚠  REST API unreachable — monitoring (will auto-restart after 10 min)")
+                elif time.time() - fail_since >= REST_FAIL_THRESHOLD:
+                    self._log("⚠  REST API unreachable for 10+ min — triggering auto-restart…")
+                    self._emit("watchdog_restart")
+                    self._stop.set()   # close WS → _run() exits → "done" fires
+                    break
+            else:
+                if fail_since is not None:
+                    self._log("✓  REST API connectivity restored")
+                fail_since = None
+
     # internal helpers ────────────────────────────────────────────────────────
     def _emit(self, *msg: Any) -> None:
         self._q.put(msg)
@@ -518,6 +545,12 @@ class _BotController:
             self._poller = _StatsPoller(traders, self._q)
             self._poller.start()
 
+            # ── Start REST connectivity watchdog ──────────────────────────────
+            threading.Thread(
+                target=self._watchdog, args=(traders,),
+                daemon=True, name="rest-watchdog",
+            ).start()
+
             self._emit("status", "trading")
             self._emit("progress", 1.0, "")
             syms_str = ", ".join(traders.keys())
@@ -567,9 +600,10 @@ class App(ctk.CTk):
         self._q        = queue.Queue()
         self._stop_evt = threading.Event()
         self._ctrl: Optional[_BotController] = None
-        self._running   = False
-        self._api_open  = True
-        self._risk_open = False  # Settings start collapsed
+        self._running              = False
+        self._api_open             = True
+        self._risk_open            = False  # Settings start collapsed
+        self._auto_restart_pending = False
         # Line counters — used to trim textboxes and prevent slow inserts
         self._log_lines   = 0
         self._agent_lines = 0
@@ -580,13 +614,16 @@ class App(ctk.CTk):
         logging.getLogger().addHandler(handler)
         logging.getLogger().setLevel(logging.INFO)
 
-        # Seed C.SYMBOLS from the config file so the live trader picks up
-        # whichever symbol the market-analyst agent last identified as best.
+        # Restore all saved settings from config before building UI so that
+        # dropdown menus show the previously-selected values on startup.
         _early_cfg = _load_config()
         if _early_cfg:
-            if "symbol" in _early_cfg:
-                C.SYMBOLS = [_early_cfg["symbol"]]
-            if "starting_wallet" in _early_cfg: C.STARTING_WALLET  = float(_early_cfg["starting_wallet"])
+            if "symbol"          in _early_cfg: C.SYMBOLS             = [_early_cfg["symbol"]]
+            if "starting_wallet" in _early_cfg: C.STARTING_WALLET     = float(_early_cfg["starting_wallet"])
+            if "risk_pct"        in _early_cfg: C.MAX_SYMBOL_FRACTION = float(_early_cfg["risk_pct"])
+            if "leverage"        in _early_cfg: C.DEFAULT_LEVERAGE    = float(_early_cfg["leverage"])
+            if "optimizer" in _early_cfg and "n_trials" in _early_cfg["optimizer"]:
+                C.INIT_TRIALS = int(_early_cfg["optimizer"]["n_trials"])
 
         self._build_ui()
         self._load_saved_keys()
@@ -697,7 +734,7 @@ class App(ctk.CTk):
         ).grid(row=0, column=0, padx=(14, 8), pady=10, sticky="w")
 
         _risk_options = [f"{p}%" for p in range(10, 100, 5)]
-        self._risk_var = ctk.StringVar(value="45%")
+        self._risk_var = ctk.StringVar(value=f"{int(C.MAX_SYMBOL_FRACTION * 100)}%")
         self._risk_menu = ctk.CTkOptionMenu(
             self._risk_body,
             values=_risk_options,
@@ -1294,6 +1331,7 @@ class App(ctk.CTk):
         self._refresh_trades()
 
     def _stop_bot(self) -> None:
+        self._auto_restart_pending = False   # user-initiated stop — no auto-restart
         self._btn_stop.configure(state="disabled")
         self._lbl_ctrl_msg.configure(text="Stopping…")
         self._set_status("stopping")
@@ -1440,6 +1478,13 @@ class App(ctk.CTk):
             self._batch_log([f"❌ Error: {short}"])
             self._lbl_ctrl_msg.configure(text=f"Error — see Activity log")
 
+        elif kind == "watchdog_restart":
+            # Watchdog detected sustained REST failure — flag for auto-restart
+            # once the bot has fully stopped ("done" fires next).
+            self._auto_restart_pending = True
+            self._set_status("stopping")
+            self._lbl_ctrl_msg.configure(text="API unreachable — restarting in 5 s…")
+
         elif kind == "done":
             self._running = False
             self._card_lev.configure(text="--")
@@ -1452,10 +1497,16 @@ class App(ctk.CTk):
             self._lev_menu.configure(state="normal")
             self._btn_apply_lev.configure(state="normal")
             self._set_status("idle")
-            self._lbl_ctrl_msg.configure(text="Ready to start")
             self._prog_outer.grid_remove()
-            self._batch_log(["Bot stopped."])
             self._refresh_trades()
+            if self._auto_restart_pending:
+                self._auto_restart_pending = False
+                self._batch_log(["Bot stopped.  Auto-restarting in 5 s…"])
+                self._lbl_ctrl_msg.configure(text="Restarting in 5 s…")
+                self.after(5000, self._start_bot)
+            else:
+                self._lbl_ctrl_msg.configure(text="Ready to start")
+                self._batch_log(["Bot stopped."])
 
     # ── Best strategy display ─────────────────────────────────────────────────
     def _update_best_params(self, d: dict) -> None:
