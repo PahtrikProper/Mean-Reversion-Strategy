@@ -75,9 +75,54 @@ def validate_or_reset_db(db_path: str) -> bool:
     global _conn
     import os
 
-    if not os.path.exists(db_path):
-        return True  # no file yet — will be created fresh on next init_db()
+    def _close_singleton() -> None:
+        """Close and clear the module-level connection under the lock."""
+        with _lock:
+            if _conn is not None:
+                try:
+                    _conn.close()
+                except Exception:
+                    pass
+                # Can't assign to global inside nested function without nonlocal;
+                # use a module-level helper instead.
 
+    def _reset_conn() -> None:
+        global _conn
+        with _lock:
+            if _conn is not None:
+                try:
+                    _conn.close()
+                except Exception:
+                    pass
+                _conn = None
+
+    def _remove_wal_artifacts() -> None:
+        """Delete any leftover WAL / SHM side-files next to *db_path*.
+
+        Stale WAL artefacts from a previous session prevent SQLite from
+        cleanly initialising a brand-new database file at the same path.
+        """
+        for ext in ("-shm", "-wal"):
+            target = db_path + ext
+            try:
+                os.remove(target)
+                log.info(f"[DB] Removed stale WAL artefact: {target}")
+            except FileNotFoundError:
+                pass
+            except Exception as exc:
+                log.warning(f"[DB] Could not remove {target}: {exc}")
+
+    # ── Case 1: file missing or empty (0 bytes) — just init fresh ─────────────
+    # Do NOT treat a blank/non-existent file as a schema error; that path
+    # skips WAL-artefact cleanup and leaves a broken singleton connection.
+    if not os.path.exists(db_path) or os.path.getsize(db_path) == 0:
+        log.info("[DB] Database file missing or empty — initialising fresh.")
+        _remove_wal_artifacts()
+        _reset_conn()          # clear any stale singleton so init_db() proceeds
+        init_db(db_path)
+        return True
+
+    # ── Case 2: file exists with content — check schema ───────────────────────
     # Minimum expected total-column count per table (PRAGMA table_info returns
     # one row per column, including the autoincrement id).  Raise these numbers
     # whenever new columns are added to keep the check current.
@@ -111,20 +156,18 @@ def validate_or_reset_db(db_path: str) -> bool:
     if not stale:
         return True
 
-    # ── Nuke the stale DB and start fresh ─────────────────────────────────────
-    with _lock:
-        if _conn is not None:
-            try:
-                _conn.close()
-            except Exception:
-                pass
-            _conn = None
+    # ── Nuke the stale DB (main file + WAL artefacts) and start fresh ─────────
+    _reset_conn()
 
-    try:
-        os.remove(db_path)
-        log.info(f"[DB] Stale database removed: {db_path}")
-    except Exception as exc:
-        log.warning(f"[DB] Could not remove stale database: {exc}")
+    for ext in ("", "-shm", "-wal"):
+        target = db_path + ext
+        try:
+            os.remove(target)
+            log.info(f"[DB] Removed stale DB file: {target}")
+        except FileNotFoundError:
+            pass
+        except Exception as exc:
+            log.warning(f"[DB] Could not remove {target}: {exc}")
 
     init_db(db_path)
     log.info(f"[DB] Fresh database initialised: {db_path}")
