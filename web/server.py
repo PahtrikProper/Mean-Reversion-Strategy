@@ -12,10 +12,12 @@ Usage:
 
 import asyncio
 import logging
+import resource
 import sqlite3
 import threading
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Generator, Optional
 
 log = logging.getLogger("chart_server")
 
@@ -32,13 +34,27 @@ _active_port    = PORT
 
 # ── DB helper ─────────────────────────────────────────────────────────────────
 
-def _get_conn() -> sqlite3.Connection:
-    """Open a read-only connection to the trading database."""
-    conn = sqlite3.connect(
-        f"file:{DB_PATH}?mode=ro", uri=True, check_same_thread=False
-    )
-    conn.row_factory = sqlite3.Row
-    return conn
+@contextmanager
+def _db_connection() -> Generator[sqlite3.Connection, None, None]:
+    """Context manager that opens a read-only DB connection and *always* closes
+    it — even when the caller raises an exception.  This prevents the FD leak
+    that previously caused ``OSError: [Errno 24] Too many open files`` after
+    the frontend's 2-second /api/ready polling exhausted the macOS per-process
+    256-FD limit.
+    """
+    conn: Optional[sqlite3.Connection] = None
+    try:
+        conn = sqlite3.connect(
+            f"file:{DB_PATH}?mode=ro", uri=True, check_same_thread=False
+        )
+        conn.row_factory = sqlite3.Row
+        yield conn
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def _db_is_ready() -> bool:
@@ -49,14 +65,11 @@ def _db_is_ready() -> bool:
     progressively once the first optimisation completes.
     """
     try:
-        conn = sqlite3.connect(
-            f"file:{DB_PATH}?mode=ro", uri=True, check_same_thread=False
-        )
-        row = conn.execute(
-            "SELECT COUNT(*) FROM candles WHERE price_type='last'"
-        ).fetchone()
-        conn.close()
-        return (row[0] or 0) > 50   # need at least a minimal seed
+        with _db_connection() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM candles WHERE price_type='last'"
+            ).fetchone()
+            return (row[0] or 0) > 50   # need at least a minimal seed
     except Exception:
         return False
 
@@ -88,31 +101,30 @@ def _make_app():
     @app.get("/api/history")
     async def history(symbol: str = "XRPUSDT", interval: str = "5", limit: int = 10000):
         try:
-            conn = _get_conn()
-            rows = conn.execute(
-                """
-                SELECT
-                    c.ts_ms                          AS time,
-                    c.open, c.high, c.low, c.close,
-                    c.volume,
-                    a.ma,
-                    a.adx, a.rsi,
-                    a.premium_1,  a.premium_2,  a.premium_3,  a.premium_4,
-                    a.premium_5,  a.premium_6,  a.premium_7,  a.premium_8,
-                    a.discount_1, a.discount_2, a.discount_3, a.discount_4,
-                    a.discount_5, a.discount_6, a.discount_7, a.discount_8
-                FROM candles c
-                LEFT JOIN candle_analytics a
-                       ON c.symbol   = a.symbol
-                      AND c.interval = a.interval
-                      AND c.ts_utc   = a.ts_utc
-                WHERE c.symbol = ? AND c.interval = ? AND c.price_type = 'last'
-                ORDER BY c.ts_ms DESC
-                LIMIT ?
-                """,
-                (symbol, interval, limit),
-            ).fetchall()
-            conn.close()
+            with _db_connection() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT
+                        c.ts_ms                          AS time,
+                        c.open, c.high, c.low, c.close,
+                        c.volume,
+                        a.ma,
+                        a.adx, a.rsi,
+                        a.premium_1,  a.premium_2,  a.premium_3,  a.premium_4,
+                        a.premium_5,  a.premium_6,  a.premium_7,  a.premium_8,
+                        a.discount_1, a.discount_2, a.discount_3, a.discount_4,
+                        a.discount_5, a.discount_6, a.discount_7, a.discount_8
+                    FROM candles c
+                    LEFT JOIN candle_analytics a
+                           ON c.symbol   = a.symbol
+                          AND c.interval = a.interval
+                          AND c.ts_utc   = a.ts_utc
+                    WHERE c.symbol = ? AND c.interval = ? AND c.price_type = 'last'
+                    ORDER BY c.ts_ms DESC
+                    LIMIT ?
+                    """,
+                    (symbol, interval, limit),
+                ).fetchall()
             # Reverse so oldest-first for Lightweight Charts
             return JSONResponse([dict(r) for r in reversed(rows)])
         except Exception as exc:
@@ -123,18 +135,17 @@ def _make_app():
     @app.get("/api/trades")
     async def trades(symbol: str = "XRPUSDT", interval: str = "5"):
         try:
-            conn = _get_conn()
-            rows = conn.execute(
-                """
-                SELECT ts_utc, action, reason, side, fill_price, qty, pnl_net, result, mode
-                FROM   trades
-                WHERE  symbol = ? AND interval = ?
-                ORDER  BY ts_utc DESC
-                LIMIT  500
-                """,
-                (symbol, interval),
-            ).fetchall()
-            conn.close()
+            with _db_connection() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT ts_utc, action, reason, side, fill_price, qty, pnl_net, result, mode
+                    FROM   trades
+                    WHERE  symbol = ? AND interval = ?
+                    ORDER  BY ts_utc DESC
+                    LIMIT  500
+                    """,
+                    (symbol, interval),
+                ).fetchall()
             return JSONResponse([dict(r) for r in rows])
         except Exception as exc:
             log.error("trades error: %s", exc)
@@ -144,19 +155,18 @@ def _make_app():
     @app.get("/api/params")
     async def params(symbol: str = "XRPUSDT", interval: str = "5"):
         try:
-            conn = _get_conn()
-            row = conn.execute(
-                """
-                SELECT adx_threshold, rsi_neutral_lo, ma_len, band_mult,
-                       exit_ma_len, exit_band_mult, leverage, tp_pct, sl_pct
-                FROM   params
-                WHERE  symbol = ? AND interval = ?
-                ORDER  BY ts_utc DESC
-                LIMIT  1
-                """,
-                (symbol, interval),
-            ).fetchone()
-            conn.close()
+            with _db_connection() as conn:
+                row = conn.execute(
+                    """
+                    SELECT adx_threshold, rsi_neutral_lo, ma_len, band_mult,
+                           exit_ma_len, exit_band_mult, leverage, tp_pct, sl_pct
+                    FROM   params
+                    WHERE  symbol = ? AND interval = ?
+                    ORDER  BY ts_utc DESC
+                    LIMIT  1
+                    """,
+                    (symbol, interval),
+                ).fetchone()
             if row:
                 return JSONResponse(dict(row))
             # Fallback defaults if no params in DB yet
@@ -174,16 +184,15 @@ def _make_app():
     @app.get("/api/symbols")
     async def symbols():
         try:
-            conn = _get_conn()
-            rows = conn.execute(
-                """
-                SELECT DISTINCT symbol, interval
-                FROM   candles
-                WHERE  price_type = 'last'
-                ORDER  BY symbol, CAST(interval AS INTEGER)
-                """
-            ).fetchall()
-            conn.close()
+            with _db_connection() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT DISTINCT symbol, interval
+                    FROM   candles
+                    WHERE  price_type = 'last'
+                    ORDER  BY symbol, CAST(interval AS INTEGER)
+                    """
+                ).fetchall()
             return JSONResponse([dict(r) for r in rows])
         except Exception as exc:
             log.error("symbols error: %s", exc)
@@ -197,8 +206,14 @@ def _make_app():
         interval: str = "5",
     ):
         await websocket.accept()
-        conn = _get_conn()
+        # WebSocket keeps its own long-lived connection — it IS closed in finally.
+        conn: Optional[sqlite3.Connection] = None
         try:
+            conn = sqlite3.connect(
+                f"file:{DB_PATH}?mode=ro", uri=True, check_same_thread=False
+            )
+            conn.row_factory = sqlite3.Row
+
             # Seed cursors from current DB state
             row = conn.execute(
                 "SELECT MAX(ts_ms) FROM candles WHERE symbol=? AND interval=? AND price_type='last'",
@@ -259,12 +274,34 @@ def _make_app():
         except Exception as exc:
             log.debug("ws closed: %s", exc)
         finally:
-            conn.close()
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     return app
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
+
+def _raise_fd_limit() -> None:
+    """Raise the per-process file-descriptor limit to the OS hard maximum.
+
+    macOS ships with a default soft limit of 256 FDs per process.  The chart
+    server opens a SQLite connection per HTTP request; under sustained polling
+    the soft limit is hit quickly, causing ``OSError: [Errno 24] Too many open
+    files`` in asyncio's socket.accept().  Bumping to the hard cap (typically
+    unlimited or 10 240 on modern macOS) gives plenty of headroom.
+    """
+    try:
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        if soft < hard:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
+            log.info("[server] FD limit raised: %d → %d", soft, hard)
+    except Exception as exc:
+        log.warning("[server] Could not raise FD limit: %s", exc)
+
 
 def start(host: str = HOST, port: int = PORT) -> int:
     """Start the chart server in a background daemon thread.
@@ -280,6 +317,7 @@ def start(host: str = HOST, port: int = PORT) -> int:
     if _server_thread and _server_thread.is_alive():
         return _active_port
 
+    _raise_fd_limit()
     _active_port = port
     _started.clear()
 
